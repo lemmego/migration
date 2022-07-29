@@ -219,7 +219,7 @@ func Create(name string) error {
 	wd, _ := os.Getwd()
 	path := filepath.Join(wd, "migrations")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-    if err := os.MkdirAll(path, os.ModePerm); err != nil {
+		if err := os.MkdirAll(path, os.ModePerm); err != nil {
 			return errors.New("Unable to create migrations directory:" + err.Error())
 		}
 	}
