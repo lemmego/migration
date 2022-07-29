@@ -26,7 +26,7 @@ func getDsnFromEnv() string {
 
 func NewDB() *sql.DB {
 	fmt.Println("Connecting to database...")
-
+	
 	db, err := sql.Open(os.Getenv("DB_DRIVER"), getDsnFromEnv())
 	if err != nil {
 		fmt.Println("Unable to connect to database", err.Error())

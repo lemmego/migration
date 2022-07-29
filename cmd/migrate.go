@@ -39,7 +39,7 @@ var migrateUpCmd = &cobra.Command{
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
-			fmt.Println("Unable to read flag `step`")
+			fmt.Println("Unable to read flag `step`", err.Error())
 			return
 		}
 
@@ -47,13 +47,13 @@ var migrateUpCmd = &cobra.Command{
 
 		migrator, err := migration.Init(db)
 		if err != nil {
-			fmt.Println("Unable to fetch migrator")
+			fmt.Println("Unable to fetch migrator", err.Error())
 			return
 		}
 
 		err = migrator.Up(step)
 		if err != nil {
-			fmt.Println("Unable to run `up` migrations")
+			fmt.Println("Unable to run `up` migrations", err.Error())
 			return
 		}
 
@@ -67,7 +67,7 @@ var migrateDownCmd = &cobra.Command{
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
-			fmt.Println("Unable to read flag `step`")
+			fmt.Println("Unable to read flag `step`", err.Error())
 			return
 		}
 
@@ -75,13 +75,13 @@ var migrateDownCmd = &cobra.Command{
 
 		migrator, err := migration.Init(db)
 		if err != nil {
-			fmt.Println("Unable to fetch migrator")
+			fmt.Println("Unable to fetch migrator", err.Error())
 			return
 		}
 
 		err = migrator.Down(step)
 		if err != nil {
-			fmt.Println("Unable to run `down` migrations")
+			fmt.Println("Unable to run `down` migrations", err.Error())
 			return
 		}
 	},
@@ -95,12 +95,12 @@ var migrateStatusCmd = &cobra.Command{
 
 		migrator, err := migration.Init(db)
 		if err != nil {
-			fmt.Println("Unable to fetch migrator")
+			fmt.Println("Unable to fetch migrator", err.Error())
 			return
 		}
 
 		if err := migrator.MigrationStatus(); err != nil {
-			fmt.Println("Unable to fetch migration status")
+			fmt.Println("Unable to fetch migration status", err.Error())
 			return
 		}
 
@@ -111,10 +111,13 @@ var migrateStatusCmd = &cobra.Command{
 func init() {
 	// Add "--name" flag to "create" command
 	migrateCreateCmd.Flags().StringP("name", "n", "", "Name for the migration")
+	migrateCreateCmd.Flags().StringP("dsn", "dsn", "", "Data Source Name")
 
 	// Add "--step" flag to both "up" and "down" command
 	migrateUpCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
+	migrateUpCmd.Flags().StringP("dsn", "dsn", "", "Data Source Name")
 	migrateDownCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
+	migrateDownCmd.Flags().StringP("dsn", "dsn", "", "Data Source Name")
 
 	// Add "create", "up" and "down" commands to the "migrate" command
 	migrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
