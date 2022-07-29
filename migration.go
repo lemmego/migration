@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -62,10 +63,10 @@ func (m *Migrator) AddMigration(mg *Migration) {
 }
 
 // Init ..
-func Init(db *sql.DB) (*Migrator, error) {
-	if os.Getenv("DB_DRIVER") == "mysql" {
+func Init(db *sql.DB, driverName string) (*Migrator, error) {
+	if driverName == "mysql" {
 		bindSymbol = "?"
-	} else if os.Getenv("DB_DRIVER") == "pgsql" {
+	} else if driverName == "postgres" {
 		bindSymbol = "$1"
 	} else {
 		return nil, errors.New("unsupported driver")
@@ -118,7 +119,6 @@ func (m *Migrator) Up(step int) error {
 		}
 
 		mg := m.Migrations[v]
-
 		if mg.done {
 			continue
 		}
@@ -216,8 +216,14 @@ func Create(name string) error {
 	if err != nil {
 		return errors.New("Unable to execute template:" + err.Error())
 	}
-	cw, _ := os.Getwd()
-	f, err := os.Create(fmt.Sprintf("%s/%s_%s.go", cw+"/migrations", version, name))
+	wd, _ := os.Getwd()
+	path := filepath.Join(wd, "migrations")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+    if err := os.MkdirAll(path, os.ModePerm); err != nil {
+			return errors.New("Unable to create migrations directory:" + err.Error())
+		}
+	}
+	f, err := os.Create(fmt.Sprintf("%s/%s_%s.go", path, version, name))
 	if err != nil {
 		return errors.New("Unable to create migration file:" + err.Error())
 	}

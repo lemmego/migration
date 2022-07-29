@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/lemmego/migration"
 	"github.com/spf13/cobra"
@@ -36,6 +37,7 @@ var migrateUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "run up migrations",
 	Run: func(cmd *cobra.Command, args []string) {
+		var dsn, driver string;
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
@@ -43,9 +45,34 @@ var migrateUpCmd = &cobra.Command{
 			return
 		}
 
-		db := migration.NewDB()
+		dsn, err = cmd.Flags().GetString("dsn")
+		if err != nil {
+			fmt.Println("Unable to read flag `dsn`", err.Error())
+			return
+		}
 
-		migrator, err := migration.Init(db)
+		driver, err = cmd.Flags().GetString("driver")
+		if err != nil {
+			fmt.Println("Unable to read flag `driver`", err.Error())
+			return
+		}
+
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+
+		if driver == "" {
+			driver = os.Getenv("DB_DRIVER")
+		}
+		
+		if dsn == "" || driver == "" {
+			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
+			return
+		}
+
+		db := migration.NewDB(dsn, driver)
+
+		migrator, err := migration.Init(db, driver)
 		if err != nil {
 			fmt.Println("Unable to fetch migrator", err.Error())
 			return
@@ -64,6 +91,7 @@ var migrateDownCmd = &cobra.Command{
 	Use:   "down",
 	Short: "run down migrations",
 	Run: func(cmd *cobra.Command, args []string) {
+		var dsn, driver string;
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
@@ -71,9 +99,34 @@ var migrateDownCmd = &cobra.Command{
 			return
 		}
 
-		db := migration.NewDB()
+		dsn, err = cmd.Flags().GetString("dsn")
+		if err != nil {
+			fmt.Println("Unable to read flag `dsn`", err.Error())
+			return
+		}
 
-		migrator, err := migration.Init(db)
+		driver, err = cmd.Flags().GetString("driver")
+		if err != nil {
+			fmt.Println("Unable to read flag `driver`", err.Error())
+			return
+		}
+
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+
+		if driver == "" {
+			driver = os.Getenv("DB_DRIVER")
+		}
+		
+		if dsn == "" || driver == "" {
+			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
+			return
+		}
+
+		db := migration.NewDB(dsn, driver)
+
+		migrator, err := migration.Init(db, driver)
 		if err != nil {
 			fmt.Println("Unable to fetch migrator", err.Error())
 			return
@@ -91,9 +144,36 @@ var migrateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "display status of each migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		db := migration.NewDB()
+		var dsn, driver string;
 
-		migrator, err := migration.Init(db)
+		dsn, err := cmd.Flags().GetString("dsn")
+		if err != nil {
+			fmt.Println("Unable to read flag `dsn`", err.Error())
+			return
+		}
+
+		driver, err = cmd.Flags().GetString("driver")
+		if err != nil {
+			fmt.Println("Unable to read flag `driver`", err.Error())
+			return
+		}
+
+		if dsn == "" {
+			dsn = os.Getenv("DATABASE_URL")
+		}
+
+		if driver == "" {
+			driver = os.Getenv("DB_DRIVER")
+		}
+		
+		if dsn == "" || driver == "" {
+			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
+			return
+		}
+
+		db := migration.NewDB(dsn, driver)
+
+		migrator, err := migration.Init(db, driver)
 		if err != nil {
 			fmt.Println("Unable to fetch migrator", err.Error())
 			return
@@ -109,17 +189,25 @@ var migrateStatusCmd = &cobra.Command{
 }
 
 func init() {
-	// Add "--name" flag to "create" command
+	// Add "--name", "--driver" and "--dsn" flags to "create" command
 	migrateCreateCmd.Flags().StringP("name", "n", "", "Name for the migration")
-	migrateCreateCmd.Flags().StringP("dsn", "dsn", "", "Data Source Name")
+	migrateCreateCmd.Flags().StringP("driver", "d", "", "Driver Name")
+	migrateCreateCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
-	// Add "--step" flag to both "up" and "down" command
+	// Add "--step", "--driver" and "--dsn" flags to "up" and "down" command
 	migrateUpCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
-	migrateUpCmd.Flags().StringP("dsn", "dsn", "", "Data Source Name")
-	migrateDownCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
-	migrateDownCmd.Flags().StringP("dsn", "dsn", "", "Data Source Name")
+	migrateUpCmd.Flags().StringP("driver", "d", "", "Data Source Name")
+	migrateUpCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
-	// Add "create", "up" and "down" commands to the "migrate" command
+	migrateDownCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
+	migrateDownCmd.Flags().StringP("driver", "d", "", "Driver Name")
+	migrateDownCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+
+	// Add "--driver" and "--dsn" flags to "status" command
+	migrateStatusCmd.Flags().StringP("driver", "d", "", "Driver Name")
+	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+
+	// Add "create", "status", "up" and "down" commands to the "migrate" command
 	migrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
 
 	// Add "migrate" command to the root command
