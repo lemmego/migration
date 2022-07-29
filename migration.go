@@ -217,7 +217,7 @@ func Create(name string) error {
 		return errors.New("Unable to execute template:" + err.Error())
 	}
 	cw, _ := os.Getwd()
-	f, err := os.Create(fmt.Sprintf("%s/%s_%s.go", cw+"/cmd/migration", version, name))
+	f, err := os.Create(fmt.Sprintf("%s/%s_%s.go", cw+"/migrations", version, name))
 	if err != nil {
 		return errors.New("Unable to create migration file:" + err.Error())
 	}
