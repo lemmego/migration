@@ -135,6 +135,17 @@ E.g.:
 
 There is also a `migrate status` command to see which migrations are currently pending and/or completed.
 
+**Note**: _If your app is already using the Cobra package, you can add the `MigrateCmd` to your root command instead of importing it to your main.go file:_
+
+```go
+// cmd/root.go
+
+import (
+	migrateCmd "github.com/lemmego/migration/cmd"
+)
+rootCmd.AddCommand(migrateCmd.MigrateCmd)
+```
+
 ## Credits
 
 This package is an enhancement of this blog post by Praveen:

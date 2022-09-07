@@ -7,7 +7,7 @@ import (
 
 func NewDB(dsn string, driverName string) *sql.DB {
 	fmt.Println("Connecting to database...")
-	
+
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		fmt.Println("Unable to connect to database", err.Error())

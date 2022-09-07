@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var migrateCmd = &cobra.Command{
+var MigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "DB Schema Migration Tool",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -37,7 +37,7 @@ var migrateUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "run up migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string;
+		var dsn, driver string
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
@@ -64,7 +64,7 @@ var migrateUpCmd = &cobra.Command{
 		if driver == "" {
 			driver = os.Getenv("DB_DRIVER")
 		}
-		
+
 		if dsn == "" || driver == "" {
 			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
 			return
@@ -91,7 +91,7 @@ var migrateDownCmd = &cobra.Command{
 	Use:   "down",
 	Short: "run down migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string;
+		var dsn, driver string
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
@@ -118,7 +118,7 @@ var migrateDownCmd = &cobra.Command{
 		if driver == "" {
 			driver = os.Getenv("DB_DRIVER")
 		}
-		
+
 		if dsn == "" || driver == "" {
 			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
 			return
@@ -144,7 +144,7 @@ var migrateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "display status of each migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string;
+		var dsn, driver string
 
 		dsn, err := cmd.Flags().GetString("dsn")
 		if err != nil {
@@ -165,7 +165,7 @@ var migrateStatusCmd = &cobra.Command{
 		if driver == "" {
 			driver = os.Getenv("DB_DRIVER")
 		}
-		
+
 		if dsn == "" || driver == "" {
 			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
 			return
@@ -183,8 +183,6 @@ var migrateStatusCmd = &cobra.Command{
 			fmt.Println("Unable to fetch migration status", err.Error())
 			return
 		}
-
-		return
 	},
 }
 
@@ -208,8 +206,8 @@ func init() {
 	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
 	// Add "create", "status", "up" and "down" commands to the "migrate" command
-	migrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
+	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
 
 	// Add "migrate" command to the root command
-	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(MigrateCmd)
 }
