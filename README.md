@@ -29,7 +29,7 @@ Or, via command line flags:
 go run . migrate up --dsn="username:password@protocol(address)/dbname?param=value" --driver=mysql
 ```
 
-_[A Note Aboute DSN: The DSN should be compatible with the database driver you wish to use. Refer to the corresponding driver's documentation to see what's the accepted format for your particular db driver. In the examples below, the "https://github.com/go-sql-driver/mysql" driver will be used and their format will be followed.]_
+_[A Note About DSN: The DSN should be compatible with the database driver you wish to use. Refer to the corresponding driver's documentation to see what's the accepted format for your particular db driver. In the examples below, the "https://github.com/go-sql-driver/mysql" driver will be used and their format will be followed.]_
 
 In all the examples below, we will assume that the values are coming from the environment variables.
 
@@ -45,7 +45,7 @@ import (
 
 	// _ "github.com/lib/pq"
 	_ "github.com/go-sql-driver/mysql"
-	// _ "packagename/migrations"
+	// _ "packagename/migrations" // This will be uncommented later
 
 	"github.com/joho/godotenv"
 	"github.com/lemmego/migration/cmd"
@@ -148,7 +148,7 @@ rootCmd.AddCommand(migrateCmd.MigrateCmd)
 
 ## Credits
 
-This package is an enhancement of this blog post by Praveen:
+This package is an enhancement and modification of this blog post by Praveen:
 https://techinscribed.com/create-db-migrations-tool-in-go-from-scratch/
 
 ## Contributing
