@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var bindSymbol string
+var dbDriver string
 
 //go:embed template.txt
 var stub string
@@ -64,18 +64,17 @@ func (m *Migrator) AddMigration(mg *Migration) {
 
 // Init ..
 func Init(db *sql.DB, driverName string) (*Migrator, error) {
-	if driverName == "mysql" {
-		bindSymbol = "?"
-	} else if driverName == "postgres" {
-		bindSymbol = "$1"
-	} else {
+	if driverName != "mysql" && driverName != "mariadb" && driverName != "sqlite3" && driverName != "postgres" {
 		return nil, errors.New("unsupported driver")
 	}
+
+	dbDriver = driverName
 	migrator.db = db
 
 	// Create `schema_migrations` table to remember which migrations were executed.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version varchar(255)
+		version varchar(255),
+		batch int
 	);`); err != nil {
 		fmt.Println("Unable to create `schema_migrations` table", err)
 		return migrator, err
@@ -107,12 +106,37 @@ func Init(db *sql.DB, driverName string) (*Migrator, error) {
 
 // Up ..
 func (m *Migrator) Up(step int) error {
+	var bindPlaceHolders string
+	if dbDriver == "mysql" || dbDriver == "mariadb" || dbDriver == "sqlite3" {
+		bindPlaceHolders = "?, ?"
+	} else if dbDriver == "postgres" {
+		bindPlaceHolders = "$1, $2"
+	} else {
+		return errors.New("unsupported driver")
+	}
+
 	tx, err := m.db.BeginTx(context.TODO(), &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 
 	count := 0
+	lastBatch := 0
+	if rows, err := m.db.Query("SELECT MAX(batch) FROM schema_migrations;"); err != nil {
+		return err
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var lastBatchPtr *int // use a pointer to int to allow for NULL values
+			if err := rows.Scan(&lastBatchPtr); err != nil {
+				return err
+			}
+			if lastBatchPtr != nil {
+				lastBatch = *lastBatchPtr // dereference the pointer to get the actual value
+			}
+		}
+	}
+
 	for _, v := range m.Versions {
 		if step > 0 && count == step {
 			break
@@ -129,7 +153,7 @@ func (m *Migrator) Up(step int) error {
 			return err
 		}
 
-		if _, err := tx.Exec("INSERT INTO schema_migrations VALUES("+bindSymbol+")", mg.Version); err != nil {
+		if _, err := tx.Exec("INSERT INTO schema_migrations VALUES("+bindPlaceHolders+")", mg.Version, lastBatch+1); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -145,21 +169,41 @@ func (m *Migrator) Up(step int) error {
 
 // Down ..
 func (m *Migrator) Down(step int) error {
+	var bindPlaceHolder string
+	if dbDriver == "mysql" {
+		bindPlaceHolder = "?"
+	} else if dbDriver == "postgres" {
+		bindPlaceHolder = "$1"
+	} else {
+		return errors.New("unsupported driver")
+	}
 	tx, err := m.db.BeginTx(context.TODO(), &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 
-	count := 0
-	for _, v := range reverse(m.Versions) {
-		if step > 0 && count == step {
-			break
+	// Reverse the migration based on the batch column and the step passed
+
+	rows, err := m.db.Query(
+		fmt.Sprintf(`SELECT version FROM schema_migrations WHERE batch BETWEEN (SELECT MAX(batch - %s) FROM schema_migrations) AND (SELECT MAX(batch) FROM schema_migrations) ORDER BY version DESC;`, bindPlaceHolder),
+		step,
+	)
+	if err != nil {
+		return err
+	}
+
+	defer rows.Close()
+
+	var version string
+	for rows.Next() {
+		err := rows.Scan(&version)
+		if err != nil {
+			return err
 		}
 
-		mg := m.Migrations[v]
-
+		mg := m.Migrations[version]
 		if !mg.done {
-			continue
+			return errors.New("migration not found")
 		}
 
 		fmt.Println("Reverting Migration", mg.Version)
@@ -168,13 +212,11 @@ func (m *Migrator) Down(step int) error {
 			return err
 		}
 
-		if _, err := tx.Exec("DELETE FROM schema_migrations WHERE version = "+bindSymbol, mg.Version); err != nil {
+		if _, err := tx.Exec("DELETE FROM schema_migrations WHERE version = "+bindPlaceHolder, mg.Version); err != nil {
 			tx.Rollback()
 			return err
 		}
 		fmt.Println("Finished reverting migration", mg.Version)
-
-		count++
 	}
 
 	tx.Commit()
