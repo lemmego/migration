@@ -14,7 +14,6 @@ import (
 )
 
 var dbDriver string
-var bindPlaceHolders string
 
 //go:embed template.txt
 var stub string
@@ -65,14 +64,11 @@ func (m *Migrator) AddMigration(mg *Migration) {
 
 // Init ..
 func Init(db *sql.DB, driverName string) (*Migrator, error) {
-	dbDriver = driverName
-	if driverName == "mysql" {
-		bindPlaceHolders = "?, ?"
-	} else if driverName == "postgres" {
-		bindPlaceHolders = "$1, $2"
-	} else {
+	if driverName != "mysql" && driverName != "mariadb" && driverName != "sqlite3" && driverName != "postgres" {
 		return nil, errors.New("unsupported driver")
 	}
+
+	dbDriver = driverName
 	migrator.db = db
 
 	// Create `schema_migrations` table to remember which migrations were executed.
@@ -110,12 +106,37 @@ func Init(db *sql.DB, driverName string) (*Migrator, error) {
 
 // Up ..
 func (m *Migrator) Up(step int) error {
+	var bindPlaceHolders string
+	if dbDriver == "mysql" || dbDriver == "mariadb" || dbDriver == "sqlite3" {
+		bindPlaceHolders = "?, ?"
+	} else if dbDriver == "postgres" {
+		bindPlaceHolders = "$1, $2"
+	} else {
+		return errors.New("unsupported driver")
+	}
+
 	tx, err := m.db.BeginTx(context.TODO(), &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 
 	count := 0
+	lastBatch := 0
+	if rows, err := m.db.Query("SELECT MAX(batch) FROM schema_migrations;"); err != nil {
+		return err
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var lastBatchPtr *int // use a pointer to int to allow for NULL values
+			if err := rows.Scan(&lastBatchPtr); err != nil {
+				return err
+			}
+			if lastBatchPtr != nil {
+				lastBatch = *lastBatchPtr // dereference the pointer to get the actual value
+			}
+		}
+	}
+
 	for _, v := range m.Versions {
 		if step > 0 && count == step {
 			break
@@ -130,22 +151,6 @@ func (m *Migrator) Up(step int) error {
 		if err := mg.Up(tx); err != nil {
 			tx.Rollback()
 			return err
-		}
-
-		lastBatch := 0
-		if rows, err := m.db.Query("SELECT MAX(batch) FROM schema_migrations;"); err != nil {
-			return err
-		} else {
-			defer rows.Close()
-			for rows.Next() {
-				var lastBatchPtr *int // use a pointer to int to allow for NULL values
-				if err := rows.Scan(&lastBatchPtr); err != nil {
-					return err
-				}
-				if lastBatchPtr != nil {
-					lastBatch = *lastBatchPtr // dereference the pointer to get the actual value
-				}
-			}
 		}
 
 		if _, err := tx.Exec("INSERT INTO schema_migrations VALUES("+bindPlaceHolders+")", mg.Version, lastBatch+1); err != nil {
