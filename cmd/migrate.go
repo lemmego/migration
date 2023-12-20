@@ -25,8 +25,9 @@ var migrateCreateCmd = &cobra.Command{
 			fmt.Println("Unable to read flag `name`", err.Error())
 			return
 		}
+		packageName, err := cmd.Flags().GetString("package")
 
-		if err := migration.Create(name); err != nil {
+		if err := migration.Create(name, packageName); err != nil {
 			fmt.Println("Unable to create migration", err.Error())
 			return
 		}
@@ -37,7 +38,7 @@ var migrateUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "run up migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string
+		var dsnStr, driver string
 
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
@@ -45,10 +46,13 @@ var migrateUpCmd = &cobra.Command{
 			return
 		}
 
-		dsn, err = cmd.Flags().GetString("dsn")
+		dsnStr, err = cmd.Flags().GetString("dsn")
 		if err != nil {
 			fmt.Println("Unable to read flag `dsn`", err.Error())
 			return
+		}
+		if dsnStr == "" {
+			dsnStr = os.Getenv("DATABASE_URL")
 		}
 
 		driver, err = cmd.Flags().GetString("driver")
@@ -56,21 +60,39 @@ var migrateUpCmd = &cobra.Command{
 			fmt.Println("Unable to read flag `driver`", err.Error())
 			return
 		}
-
-		if dsn == "" {
-			dsn = os.Getenv("DATABASE_URL")
-		}
-
 		if driver == "" {
-			driver = os.Getenv("DB_DRIVER")
+			if val, found := os.LookupEnv("DB_DRIVER"); found {
+				driver = val
+			} else {
+				fmt.Println("Driver is required. Either pass it as flag (--driver) or set the DB_DRIVER environment variable.")
+				return
+			}
 		}
 
-		if dsn == "" || driver == "" {
-			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
-			return
+		if dsnStr == "" {
+			dsn := migration.NewDsnBuilder().
+				SetHost(os.Getenv("DB_HOST")).
+				SetPort(os.Getenv("DB_PORT")).
+				SetUsername(os.Getenv("DB_USERNAME")).
+				SetPassword(os.Getenv("DB_PASSWORD")).
+				SetName(os.Getenv("DB_DATABASE")).
+				SetCharset(os.Getenv("DB_CHARSET")).
+				Build()
+
+			switch driver {
+			case "mysql":
+				dsnStr = dsn.GetMysqlDSN()
+			case "postgres":
+				dsnStr = dsn.GetPostgresDSN()
+			case "sqlite3":
+				dsnStr = dsn.GetSqliteDSN()
+			default:
+				fmt.Println("Driver not supported")
+				return
+			}
 		}
 
-		db := migration.NewDB(dsn, driver)
+		db := migration.NewDB(dsnStr, driver)
 
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
@@ -83,7 +105,6 @@ var migrateUpCmd = &cobra.Command{
 			fmt.Println("Unable to run `up` migrations", err.Error())
 			return
 		}
-
 	},
 }
 
@@ -189,6 +210,7 @@ var migrateStatusCmd = &cobra.Command{
 func init() {
 	// Add "--name", "--driver" and "--dsn" flags to "create" command
 	migrateCreateCmd.Flags().StringP("name", "n", "", "Name for the migration")
+	migrateCreateCmd.Flags().StringP("package", "p", "", "Name of the package where the migration will be generated (default: main)")
 	migrateCreateCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateCreateCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
@@ -206,8 +228,9 @@ func init() {
 	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
 	// Add "create", "status", "up" and "down" commands to the "migrate" command
-	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
+	// MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
+	rootCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
 
 	// Add "migrate" command to the root command
-	rootCmd.AddCommand(MigrateCmd)
+	// rootCmd.AddCommand(MigrateCmd)
 }

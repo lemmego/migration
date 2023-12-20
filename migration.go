@@ -240,15 +240,21 @@ func (m *Migrator) MigrationStatus() error {
 }
 
 // Create ..
-func Create(name string) error {
+func Create(name string, packageName string) error {
 	version := time.Now().Format("20060102150405")
+
+	if packageName == "" {
+		packageName = "main"
+	}
 
 	in := struct {
 		Version string
 		Name    string
+		Package string
 	}{
 		Version: version,
 		Name:    name,
+		Package: packageName,
 	}
 
 	var out bytes.Buffer
