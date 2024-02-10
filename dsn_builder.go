@@ -1,32 +1,44 @@
 package migration
 
-import "strconv"
+import (
+	"log"
+	"regexp"
+	"slices"
+	"strings"
+)
+
+var supportedDialects = []string{"mysql", "postgres", "sqlite", "mssql"}
 
 type DsnBuilder struct {
+	Dialect  string
 	Host     string
-	Port     int
+	Port     string
 	Username string
 	Password string
 	Name     string
-	Charset  string
+	Params   string
 }
 
 type DSN struct {
-	Host     string
-	Port     int
-	Username string
-	Password string
-	Name     string
-	Charset  string
+	dialect  string
+	host     string
+	port     string
+	username string
+	password string
+	name     string
+	params   string
 }
 
-func NewDsnBuilder() *DsnBuilder {
-	return &DsnBuilder{}
+func NewDsnBuilder(dialect string) *DsnBuilder {
+	if !slices.Contains(supportedDialects, strings.ToLower(dialect)) {
+		log.Fatal("Unsupported dialect")
+	}
+	return &DsnBuilder{Dialect: dialect}
 }
 
 func (d *DsnBuilder) SetHost(host string) *DsnBuilder {
 	if host == "" {
-		panic("DB Host is required")
+		log.Fatal("DB Host is required")
 	}
 
 	d.Host = host
@@ -34,21 +46,13 @@ func (d *DsnBuilder) SetHost(host string) *DsnBuilder {
 }
 
 func (d *DsnBuilder) SetPort(port string) *DsnBuilder {
-	if port == "" {
-		panic("DB Port is required")
-	}
-
-	if intPort, err := strconv.Atoi(port); err != nil {
-		panic(err)
-	} else {
-		d.Port = intPort
-	}
+	d.Port = port
 	return d
 }
 
 func (d *DsnBuilder) SetUsername(username string) *DsnBuilder {
 	if username == "" {
-		panic("DB Username is required")
+		log.Fatal("DB Username is required")
 	}
 
 	d.Username = username
@@ -56,51 +60,66 @@ func (d *DsnBuilder) SetUsername(username string) *DsnBuilder {
 }
 
 func (d *DsnBuilder) SetPassword(password string) *DsnBuilder {
-	if password == "" {
-		panic("DB Password is required")
-	}
-
 	d.Password = password
 	return d
 }
 
 func (d *DsnBuilder) SetName(name string) *DsnBuilder {
 	if name == "" {
-		panic("DB name is required")
+		log.Fatal("DB name is required")
 	}
 
 	d.Name = name
 	return d
 }
 
-func (d *DsnBuilder) SetCharset(charset string) *DsnBuilder {
-	d.Charset = charset
+func (d *DsnBuilder) SetParams(params string) *DsnBuilder {
+	d.validateParams(params)
+
+	if d.Dialect == "mysql" || d.Dialect == "mssql" {
+		d.Params = "?" + params
+	}
+
+	if d.Dialect == "postgres" {
+		split := strings.Split(params, "&")
+		d.Params = " " + strings.Join(split, " ")
+	}
 	return d
+}
+
+// Make sure the params field conforms to this format: param1=value1&paramN=valueN
+// Or, (?:[a-zA-Z0-9]+=[a-zA-Z0-9]+)(?:&[a-zA-Z0-9]+=[a-zA-Z0-9]+)*
+func (d *DsnBuilder) validateParams(params string) {
+	if regexp.MustCompile(`^(?:[a-zA-Z0-9]+=[a-zA-Z0-9]+)(?:&[a-zA-Z0-9]+=[a-zA-Z0-9]+)*$`).MatchString(params) {
+		return
+	}
+
+	log.Fatal("Invalid params format")
 }
 
 func (d *DsnBuilder) Build() *DSN {
 	return &DSN{
-		Host:     d.Host,
-		Port:     d.Port,
-		Username: d.Username,
-		Password: d.Password,
-		Name:     d.Name,
-		Charset:  d.Charset,
+		host:     d.Host,
+		port:     d.Port,
+		username: d.Username,
+		password: d.Password,
+		name:     d.Name,
+		params:   d.Params,
 	}
 }
 
 func (d *DSN) GetMysqlDSN() string {
-	return d.Username + ":" + d.Password + "@tcp(" + d.Host + ":" + string(d.Port) + ")/" + d.Name + "?charset=" + d.Charset
+	return d.username + ":" + d.password + "@tcp(" + d.host + ":" + string(d.port) + ")/" + d.name + d.params
 }
 
 func (d *DSN) GetPostgresDSN() string {
-	return "host=" + d.Host + " port=" + string(d.Port) + " user=" + d.Username + " password=" + d.Password + " dbname=" + d.Name + " sslmode=disable"
-}
-
-func (d *DSN) GetSqliteDSN() string {
-	return d.Name
+	return "host=" + d.host + " port=" + d.port + " user=" + d.username + " password=" + d.password + " dbname=" + d.name + d.params
 }
 
 func (d *DSN) GetMssqlDSN() string {
-	return "sqlserver://" + d.Username + ":" + d.Password + "@" + d.Host + ":" + string(d.Port) + "?database=" + d.Name
+	return "sqlserver://" + d.username + ":" + d.password + "@" + d.host + ":" + string(d.port) + "?database=" + d.name
+}
+
+func (d *DSN) GetSqliteDSN() string {
+	return d.name
 }

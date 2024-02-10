@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -240,21 +242,16 @@ func (m *Migrator) MigrationStatus() error {
 }
 
 // Create ..
-func Create(name string, packageName string) error {
+func Create(name string) error {
+	migrationsDir := "./cmd/migrations"
 	version := time.Now().Format("20060102150405")
-
-	if packageName == "" {
-		packageName = "main"
-	}
 
 	in := struct {
 		Version string
 		Name    string
-		Package string
 	}{
 		Version: version,
 		Name:    name,
-		Package: packageName,
 	}
 
 	var out bytes.Buffer
@@ -265,7 +262,7 @@ func Create(name string, packageName string) error {
 		return errors.New("Unable to execute template:" + err.Error())
 	}
 	wd, _ := os.Getwd()
-	path := filepath.Join(wd, "migrations")
+	path := filepath.Join(wd, migrationsDir)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.MkdirAll(path, os.ModePerm); err != nil {
 			return errors.New("Unable to create migrations directory:" + err.Error())
