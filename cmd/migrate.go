@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/lemmego/migration"
@@ -33,53 +32,49 @@ var migrateCreateCmd = &cobra.Command{
 	},
 }
 
-func GetDsnAndDriver(cmd *cobra.Command) (string, string) {
-	var dsnStr, driver string
+func GetDriver(cmd *cobra.Command) (string, error) {
+	driver, err := cmd.Flags().GetString("driver")
+	if err != nil {
+		return "", err
+	}
 
+	if driver == "" {
+		driver = os.Getenv("DB_DRIVER")
+	}
+
+	if driver == "" {
+		return "", fmt.Errorf("driver is required")
+	}
+
+	return driver, nil
+}
+
+func GetDSN(cmd *cobra.Command, driver string) (string, error) {
 	dsnStr, err := cmd.Flags().GetString("dsn")
 	if err != nil {
-		log.Fatalf("Unable to read flag `dsn`", err.Error())
+		return "", err
 	}
 
 	if dsnStr == "" {
 		dsnStr = os.Getenv("DATABASE_URL")
 	}
 
-	driver, err = cmd.Flags().GetString("driver")
-	if err != nil {
-		log.Fatalf("Unable to read flag `driver`", err.Error())
-	}
-	if driver == "" {
-		if val, found := os.LookupEnv("DB_DRIVER"); found {
-			driver = val
-		} else {
-			log.Fatalf("Driver is required. Either pass it as flag (--driver) or set the DB_DRIVER environment variable.")
-		}
-	}
-
 	if dsnStr == "" {
-		dsn := migration.NewDsnBuilder(driver).
+		dsnStr, err = migration.NewDsnBuilder().
 			SetHost(os.Getenv("DB_HOST")).
 			SetPort(os.Getenv("DB_PORT")).
 			SetUsername(os.Getenv("DB_USERNAME")).
 			SetPassword(os.Getenv("DB_PASSWORD")).
 			SetName(os.Getenv("DB_DATABASE")).
-			Build()
-
-		switch driver {
-		case "mysql":
-			dsnStr = dsn.GetMysqlDSN()
-		case "postgres":
-			dsnStr = dsn.GetPostgresDSN()
-			log.Println("[DSN:", dsnStr, "]")
-		case "sqlite3":
-			dsnStr = dsn.GetSqliteDSN()
-		default:
-			log.Fatalf("Driver not supported")
+			SetParams(os.Getenv("DB_PARAMS")).
+			SetDialect(driver).
+			ToString()
+		if err != nil {
+			return "", err
 		}
 	}
 
-	return dsnStr, driver
+	return dsnStr, nil
 }
 
 var migrateUpCmd = &cobra.Command{
@@ -91,7 +86,19 @@ var migrateUpCmd = &cobra.Command{
 			fmt.Println("Unable to read flag `step`", err.Error())
 			return
 		}
-		dsnStr, driver := GetDsnAndDriver(cmd)
+
+		driver, err := GetDriver(cmd)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		dsnStr, err := GetDSN(cmd, driver)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
 		db := migration.NewDB(dsnStr, driver)
 		if db == nil {
 			fmt.Println("Unable to connect to the database")
@@ -122,8 +129,23 @@ var migrateDownCmd = &cobra.Command{
 			return
 		}
 
-		dsnStr, driver := GetDsnAndDriver(cmd)
+		driver, err := GetDriver(cmd)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		dsnStr, err := GetDSN(cmd, driver)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
 		db := migration.NewDB(dsnStr, driver)
+		if db == nil {
+			fmt.Println("Unable to connect to the database")
+			return
+		}
 
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
@@ -143,9 +165,23 @@ var migrateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "display status of each migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		dsn, driver := GetDsnAndDriver(cmd)
-		db := migration.NewDB(dsn, driver)
+		driver, err := GetDriver(cmd)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 
+		dsnStr, err := GetDSN(cmd, driver)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		db := migration.NewDB(dsnStr, driver)
+		if db == nil {
+			fmt.Println("Unable to connect to the database")
+			return
+		}
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
 			fmt.Println("Unable to fetch migrator", err.Error())

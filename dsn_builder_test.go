@@ -2,21 +2,33 @@ package migration
 
 import "testing"
 
-func TestDSNBuilderLogsFatalOnInvalidDriver(t *testing.T) {
-	NewDsnBuilder("invalid")
-}
-
-func TestDSNBuilderMySql(t *testing.T) {
-	expected := "root:password@tcp(localhost:3306)/test?parseTime=true"
-	dsn := NewDsnBuilder("mysql").
+func TestDSNBuilderReturnsErrorForUnsupportedDialect(t *testing.T) {
+	_, err := NewDsnBuilder().
 		SetHost("localhost").
 		SetPort("3306").
 		SetUsername("root").
 		SetPassword("password").
 		SetName("test").
 		SetParams("parseTime=true").
-		Build().
-		GetMysqlDSN()
+		SetDialect("unsupported").
+		ToString()
+
+	if err != ErrUnsupportedDialect {
+		t.Errorf("Expected %s, got %s", ErrUnsupportedDialect, err)
+	}
+}
+
+func TestDSNBuilderMySql(t *testing.T) {
+	expected := "root:password@tcp(localhost:3306)/test?parseTime=true"
+	dsn, _ := NewDsnBuilder().
+		SetHost("localhost").
+		SetPort("3306").
+		SetUsername("root").
+		SetPassword("password").
+		SetName("test").
+		SetParams("parseTime=true").
+		SetDialect("mysql").
+		ToString()
 
 	if dsn != expected {
 		t.Errorf("Expected %s, got %s", expected, dsn)
@@ -25,17 +37,21 @@ func TestDSNBuilderMySql(t *testing.T) {
 
 func TestDSNBuilderPostgres(t *testing.T) {
 	expected := "host=localhost port=5432 user=root password=password dbname=test sslmode=disable"
-	dsn := NewDsnBuilder("postgres").
+	dsn, err := NewDsnBuilder().
 		SetHost("localhost").
 		SetPort("5432").
 		SetName("test").
 		SetUsername("root").
 		SetPassword("password").
 		SetParams("sslmode=disable").
-		Build().
-		GetPostgresDSN()
+		SetDialect("postgres").
+		ToString()
+
+	if err != nil {
+		t.Errorf("Expected error to be nil, got %s", err)
+	}
 
 	if dsn != expected {
-		t.Errorf("Expected %s, got %s", expected, dsn)
+		t.Errorf("Expected dsn to be %s, got %s", expected, dsn)
 	}
 }

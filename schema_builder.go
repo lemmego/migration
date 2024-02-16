@@ -1,6 +1,9 @@
 package migration
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type constraint struct {
 	name           string
@@ -18,8 +21,10 @@ type index struct {
 }
 
 type foreignKey struct {
+	table      *Table
 	columns    []string
 	references string
+	on         string
 	onDelete   string
 	onUpdate   string
 }
@@ -27,11 +32,12 @@ type foreignKey struct {
 type Column struct {
 	table        *Table
 	name         string
-	dataType     string
+	dataType     *DataType
 	nullable     bool
 	defaultValue any
 	unique       bool
 	primary      bool
+	incrementing bool
 	oldName      string
 	operation    string
 	foreignKeys  []*foreignKey
@@ -46,19 +52,28 @@ type Table struct {
 }
 
 type Schema struct {
+	dialect   string
 	tableName string
 	operation string
 	table     *Table
 }
 
+func determineDialect() string {
+	if dialect := os.Getenv("DB_DRIVER"); dialect != "" {
+		return dialect
+	}
+	// default to sqlite
+	return "sqlite"
+}
+
 func NewSchema() *Schema {
-	return &Schema{}
+	return &Schema{dialect: determineDialect()}
 }
 
 func (s *Schema) Create(tableName string, tableFunc func(t *Table) error) *Schema {
 	s.tableName = tableName
 	s.operation = "create"
-	t := &Table{name: tableName}
+	t := &Table{name: tableName, dialect: s.dialect}
 	s.table = t
 	if err := tableFunc(t); err != nil {
 		panic(err)
@@ -69,7 +84,7 @@ func (s *Schema) Create(tableName string, tableFunc func(t *Table) error) *Schem
 func (s *Schema) Table(tableName string, tableFunc func(t *Table) error) *Schema {
 	s.tableName = tableName
 	s.operation = "alter"
-	t := &Table{name: tableName}
+	t := &Table{name: tableName, dialect: s.dialect}
 	s.table = t
 	if err := tableFunc(t); err != nil {
 		panic(err)
@@ -80,87 +95,116 @@ func (s *Schema) Table(tableName string, tableFunc func(t *Table) error) *Schema
 func (s *Schema) Drop(tableName string) *Schema {
 	s.tableName = tableName
 	s.operation = "drop"
-	s.table = &Table{name: tableName}
+	s.table = &Table{name: tableName, dialect: s.dialect}
 	return s
 }
 
-func (t *Table) tinyInt(name string) *Column {
-	c := t.AddColumn(name, "tinyInt")
-	t.columns = append(t.columns, c)
+func (t *Table) HasConstraints() bool {
+	return len(t.constraints) > 0
+}
+
+func (t *Table) Increments(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeIncrements, t.dialect))
+	c.incrementing = true
 	return c
 }
 
-func (t *Table) bool(name string) *Column {
-	c := t.AddColumn(name, "bool")
-	t.columns = append(t.columns, c)
+func (t *Table) BigIncrements(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeBigIncrements, t.dialect))
+	c.incrementing = true
 	return c
 }
 
-func (t *Table) smallInt(name string) *Column {
-	c := t.AddColumn(name, "smallInt")
-	t.columns = append(t.columns, c)
+func (t *Table) Char(name string, length uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeChar, t.dialect).WithLength(length))
 	return c
 }
 
-func (t *Table) mediumInt(name string) *Column {
-	c := t.AddColumn(name, "mediumInt")
-	t.columns = append(t.columns, c)
+func (t *Table) String(name string, length uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeVarchar, t.dialect).WithLength(length))
 	return c
 }
 
-func (t *Table) int(name string) *Column {
-	c := t.AddColumn(name, "int")
-	t.columns = append(t.columns, c)
+func (t *Table) Text(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeText, t.dialect))
 	return c
 }
 
-func (t *Table) bigInt(name string) *Column {
-	c := t.AddColumn(name, "bigInt")
-	t.columns = append(t.columns, c)
+func (t *Table) TinyInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTinyInt, t.dialect))
 	return c
 }
 
-func (t *Table) float(name string) *Column {
-	c := t.AddColumn(name, "float")
-	t.columns = append(t.columns, c)
+func (t *Table) Boolean(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeBool, t.dialect))
 	return c
 }
 
-func (t *Table) double(name string) *Column {
-	c := t.AddColumn(name, "double")
-	t.columns = append(t.columns, c)
+func (t *Table) SmallInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeSmallInt, t.dialect))
 	return c
 }
 
-func (t *Table) decimal(name string) *Column {
-	c := t.AddColumn(name, "decimal")
-	t.columns = append(t.columns, c)
+func (t *Table) MediumInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeMediumInt, t.dialect))
 	return c
 }
 
-func (t *Table) date(name string) *Column {
-	c := t.AddColumn(name, "date")
-	t.columns = append(t.columns, c)
+func (t *Table) Int(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeInt, t.dialect))
 	return c
 }
 
-func (t *Table) dateTime(name string) *Column {
-	c := t.AddColumn(name, "dateTime")
-	t.columns = append(t.columns, c)
+func (t *Table) BigInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeBigInt, t.dialect))
 	return c
 }
 
-func (t *Table) time(name string) *Column {
-	c := t.AddColumn(name, "time")
-	t.columns = append(t.columns, c)
+func (t *Table) UnsignedBigInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeUnsignedBigInt, t.dialect))
 	return c
 }
 
-func (t *Table) AddColumn(name string, dataType string) *Column {
+func (t *Table) Float(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeFloat, t.dialect))
+	return c
+}
+
+func (t *Table) Double(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeDouble, t.dialect))
+	return c
+}
+
+func (t *Table) Decimal(name string, precision uint, scale uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeDecimal, t.dialect).WithPrecision(precision).WithScale(scale))
+	return c
+}
+
+func (t *Table) Date(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeDate, t.dialect))
+	return c
+}
+
+func (t *Table) DateTime(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeDateTime, t.dialect))
+	return c
+}
+
+func (t *Table) Time(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTime, t.dialect))
+	return c
+}
+
+func (t *Table) Timestamp(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTimestamp, t.dialect))
+	return c
+}
+
+func (t *Table) AddColumn(name string, dataType *DataType) *Column {
 	c := &Column{
 		name:      name,
 		table:     t,
-		dataType:  ResolveType(dataType, t.dialect),
+		dataType:  dataType,
 		operation: "add",
 	}
 	t.columns = append(t.columns, c)
@@ -169,6 +213,7 @@ func (t *Table) AddColumn(name string, dataType string) *Column {
 
 func (t *Table) DropColumn(name string) *Column {
 	c := &Column{
+		table:     t,
 		name:      name,
 		operation: "drop",
 	}
@@ -178,6 +223,7 @@ func (t *Table) DropColumn(name string) *Column {
 
 func (t *Table) AlterColumn(name string, dataType string) *Column {
 	c := &Column{
+		table:     t,
 		name:      name,
 		operation: "alter",
 	}
@@ -187,6 +233,7 @@ func (t *Table) AlterColumn(name string, dataType string) *Column {
 
 func (t *Table) RenameColumn(oldName string, newName string) *Column {
 	c := &Column{
+		table:     t,
 		name:      newName,
 		oldName:   oldName,
 		operation: "rename",
@@ -287,12 +334,10 @@ func (t *Table) DropUnique(name string) {
 	t.constraints = append(t.constraints, c)
 }
 
-func (t *Table) ForeignKey(columns []string, references string, onDelete string, onUpdate string) {
+func (t *Table) ForeignKey(columns ...string) *foreignKey {
 	fk := &foreignKey{
-		columns:    columns,
-		references: references,
-		onDelete:   onDelete,
-		onUpdate:   onUpdate,
+		table:   t,
+		columns: columns,
 	}
 	fkName := ""
 	for _, column := range columns {
@@ -304,6 +349,27 @@ func (t *Table) ForeignKey(columns []string, references string, onDelete string,
 		foreignKey: fk,
 	}
 	t.constraints = append(t.constraints, c)
+	return fk
+}
+
+func (f *foreignKey) References(table string) *foreignKey {
+	f.references = table
+	return f
+}
+
+func (f *foreignKey) On(on string) *foreignKey {
+	f.on = on
+	return f
+}
+
+func (f *foreignKey) OnDelete(onDelete string) *foreignKey {
+	f.onDelete = onDelete
+	return f
+}
+
+func (f *foreignKey) OnUpdate(onUpdate string) *foreignKey {
+	f.onUpdate = onUpdate
+	return f
 }
 
 func (t *Table) DropForeignKey(name string) {
@@ -314,7 +380,7 @@ func (t *Table) DropForeignKey(name string) {
 	t.constraints = append(t.constraints, c)
 }
 
-func (c *Column) Type(dataType string) *Column {
+func (c *Column) Type(dataType *DataType) *Column {
 	c.dataType = dataType
 	return c
 }
@@ -324,7 +390,12 @@ func (c *Column) Nullable() *Column {
 	return c
 }
 
-func (c *Column) DefaultValue(defaultValue any) *Column {
+func (c *Column) NotNull() *Column {
+	c.nullable = false
+	return c
+}
+
+func (c *Column) Default(defaultValue any) *Column {
 	c.defaultValue = defaultValue
 	return c
 }
@@ -350,6 +421,10 @@ func (c *Column) ForeignKey(columns []string, references string, onDelete string
 	return c
 }
 
+func (c *Column) Change() {
+	c.operation = "alter"
+}
+
 func (c *Column) Done() *Table {
 	return c.table
 }
@@ -367,156 +442,312 @@ func (s *Schema) Build() string {
 }
 
 func (s *Schema) buildCreate() string {
-	sql := "create table " + s.tableName + " (\n"
-	for i, c := range s.table.columns {
-		sql += c.name + " " + c.dataType
-		if !c.nullable {
-			sql += " not null"
-		}
-		if c.primary {
-			sql += " primary key"
-		}
-		if c.unique {
-			sql += " unique"
-		}
-		if c.defaultValue != nil {
-			sql += " default " + s.toSQL(c.defaultValue)
-		}
-		if i < len(s.table.columns)-1 {
-			sql += ",\n"
-		}
+	switch s.dialect {
+	case DialectSQLite:
+		return s.buildCreateSQLite()
+	case DialectMySQL:
+		return s.buildCreateMySQL()
+	case DialectPostgres:
+		return s.buildCreatePostgreSQL()
 	}
-	if len(s.table.constraints) > 0 {
-		sql += ",\n"
-	}
-	for i, c := range s.table.constraints {
-		if c.primaryColumns != nil {
-			sql += "constraint " + c.name + " primary key (" + s.toSQL(c.primaryColumns) + ")"
-		}
-		if c.index != nil {
-			sql += "create index " + c.index.name + " on " + s.tableName + " (" + s.toSQL(c.index.columns) + ")"
-		}
-		if c.uniqueColumns != nil {
-			sql += "constraint " + c.name + " unique (" + s.toSQL(c.uniqueColumns) + ")"
-		}
-		if c.foreignKey != nil {
-			sql += "constraint " + c.name + " foreign key (" + s.toSQL(c.foreignKey.columns) + ") references " + c.foreignKey.references
-			if c.foreignKey.onDelete != "" {
-				sql += " on delete " + c.foreignKey.onDelete
-			}
-			if c.foreignKey.onUpdate != "" {
-				sql += " on update " + c.foreignKey.onUpdate
-			}
-		}
-		if i < len(s.table.constraints)-1 {
-			sql += ",\n"
-		}
-	}
-	sql += "\n);"
-	return sql
+	return ""
 }
 
 func (s *Schema) buildAlter() string {
-	sql := "alter table " + s.tableName + " "
-	for _, c := range s.table.columns {
-		switch c.operation {
+	switch s.dialect {
+	case DialectSQLite:
+		return s.buildAlterSQLite()
+	case DialectMySQL:
+		return s.buildAlterMySQL()
+	case DialectPostgres:
+		return s.buildAlterPostgreSQL()
+	}
+	return ""
+}
+
+func (s *Schema) buildDrop() string {
+	switch s.dialect {
+	case DialectSQLite:
+		return s.buildDropSQLite()
+	case DialectMySQL:
+		return s.buildDropMySQL()
+	case DialectPostgres:
+		return s.buildDropPostgreSQL()
+	}
+	return ""
+}
+
+func (s *Schema) buildCreateSQLite() string {
+	sql := "CREATE TABLE " + s.tableName + " ("
+	for index, column := range s.table.columns {
+		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
+			sql += s.buildColumn(column, false)
+		} else {
+			sql += s.buildColumn(column, true)
+		}
+	}
+	sql += s.buildConstraints()
+	sql += ");"
+	return sql
+}
+
+func (s *Schema) buildCreateMySQL() string {
+	sql := "CREATE TABLE " + s.tableName + " ("
+	for index, column := range s.table.columns {
+		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
+			sql += s.buildColumn(column, false)
+		} else {
+			sql += s.buildColumn(column, true)
+		}
+	}
+	sql += s.buildConstraints()
+	sql += ");"
+	return sql
+}
+
+func (s *Schema) buildCreatePostgreSQL() string {
+	sql := "CREATE TABLE " + s.tableName + " ("
+	for index, column := range s.table.columns {
+		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
+			sql += s.buildColumn(column, false)
+		} else {
+			sql += s.buildColumn(column, true)
+		}
+	}
+	sql += s.buildConstraints()
+	sql += ");"
+	return sql
+}
+
+func (s *Schema) buildAlterSQLite() string {
+	sql := "ALTER TABLE " + s.tableName + " "
+	for index, column := range s.table.columns {
+		columnStr := ""
+		if index == len(s.table.columns)-1 {
+			columnStr = s.buildColumn(column, false)
+		} else {
+			columnStr = s.buildColumn(column, true)
+		}
+		switch column.operation {
 		case "add":
-			sql += "add column " + c.name + " " + c.dataType
-			if !c.nullable {
-				sql += " not null"
+			sql += "ADD COLUMN " + columnStr
+		case "drop":
+			sql += "DROP COLUMN " + column.name
+		case "alter":
+			sql += "ALTER COLUMN " + columnStr
+		case "rename":
+			sql += "RENAME COLUMN " + column.oldName + " TO " + column.name
+		}
+	}
+	sql += s.buildConstraints()
+	sql += ";"
+	return sql
+}
+
+func (s *Schema) buildAlterMySQL() string {
+	sql := "ALTER TABLE " + s.tableName + " "
+	for index, column := range s.table.columns {
+		columnStr := ""
+		if index == len(s.table.columns)-1 {
+			columnStr = s.buildColumn(column, false)
+		} else {
+			columnStr = s.buildColumn(column, true)
+		}
+		switch column.operation {
+		case "add":
+			sql += "ADD COLUMN " + columnStr
+		case "drop":
+			sql += "DROP COLUMN " + column.name
+		case "alter":
+			sql += "MODIFY COLUMN " + columnStr
+		case "rename":
+			sql += "RENAME COLUMN " + column.oldName + " TO " + column.name
+		}
+	}
+	sql += s.buildConstraints()
+	sql += ";"
+	return sql
+}
+
+func (s *Schema) buildAlterPostgreSQL() string {
+	sql := "ALTER TABLE " + s.tableName + " "
+	for index, column := range s.table.columns {
+		columnStr := ""
+		if index == len(s.table.columns)-1 {
+			columnStr = s.buildColumn(column, false)
+		} else {
+			columnStr = s.buildColumn(column, true)
+		}
+		switch column.operation {
+		case "add":
+			sql += "ADD COLUMN " + columnStr
+		case "drop":
+			sql += "DROP COLUMN " + column.name
+		case "alter":
+			sql += "ALTER COLUMN " + columnStr
+		case "rename":
+			sql += "RENAME COLUMN " + column.oldName + " TO " + column.name
+		}
+	}
+	sql += s.buildConstraints()
+	sql += ";"
+	return sql
+}
+
+func (s *Schema) buildDropSQLite() string {
+	return "DROP TABLE " + s.tableName + ";"
+}
+
+func (s *Schema) buildDropMySQL() string {
+	return "DROP TABLE " + s.tableName + ";"
+}
+
+func (s *Schema) buildDropPostgreSQL() string {
+	return "DROP TABLE " + s.tableName + ";"
+}
+
+func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
+	sql := "\n" + column.name + " "
+
+	if column.dataType != nil {
+		sql += column.dataType.ToString()
+	}
+
+	if !column.nullable {
+		sql += " NOT NULL"
+	}
+	if column.defaultValue != nil {
+		sql += " DEFAULT " + fmt.Sprintf("%v", column.defaultValue)
+	}
+	if column.unique {
+		sql += " UNIQUE"
+	}
+	if column.primary {
+		sql += " PRIMARY KEY"
+	}
+	if column.table.dialect == DialectSQLite && column.incrementing {
+		sql += " AUTOINCREMENT"
+	}
+	if column.table.dialect == DialectMySQL && column.incrementing {
+		sql += " AUTO_INCREMENT"
+	}
+	if len(column.foreignKeys) > 0 {
+		for _, fk := range column.foreignKeys {
+			sql += ", " + s.buildForeignKey(fk)
+		}
+	}
+
+	if column.dataType != nil && column.table.dialect == DialectPostgres && (column.dataType.genericName == ColTypeIncrements || column.dataType.genericName == ColTypeBigIncrements) {
+		sql += " CHECK (" + column.name + " > 0)"
+	}
+
+	// Add trailing comma if trailingComma is true
+	if trailingComma {
+		return sql + ", "
+	}
+
+	return sql
+}
+
+func (s *Schema) buildConstraints() string {
+	sql := ""
+	for _, constraint := range s.table.constraints {
+		switch constraint.operation {
+		case "add":
+			if len(constraint.primaryColumns) > 0 {
+				sql += "PRIMARY KEY (" + s.buildColumns(constraint.primaryColumns) + "), "
 			}
-			if c.primary {
-				sql += " primary key"
-			}
-			if c.unique {
-				sql += " unique"
-			}
-			if c.defaultValue != nil {
-				sql += " default " + s.toSQL(c.defaultValue)
-			}
-			if len(c.foreignKeys) > 0 {
-				for _, fk := range c.foreignKeys {
-					sql += "constraint " + s.tableName + "_" + c.name + "_fkey foreign key (" + s.toSQL(fk.columns) + ") references " + fk.references
-					if fk.onDelete != "" {
-						sql += " on delete " + fk.onDelete
-					}
-					if fk.onUpdate != "" {
-						sql += " on update " + fk.onUpdate
-					}
+			if len(constraint.uniqueColumns) > 0 {
+				prefix := ""
+				if s.dialect == DialectPostgres {
+					prefix = "UNIQUE "
+				} else if s.dialect == DialectMySQL {
+					prefix = "UNIQUE " + constraint.name + " "
+				} else if s.dialect == DialectSQLite {
+					prefix = "UNIQUE "
 				}
+				sql += prefix + "(" + s.buildColumns(constraint.uniqueColumns) + "), "
+			}
+			if constraint.index != nil {
+				sql += "INDEX " + constraint.index.name + " (" + s.buildColumns(constraint.index.columns) + "), "
+			}
+			if constraint.foreignKey != nil {
+				sql += s.buildForeignKey(constraint.foreignKey) + ", "
 			}
 		case "drop":
-			sql += "drop column " + c.name
-		case "alter":
-			sql += "alter column " + c.name + " type " + c.dataType
-		case "rename":
-			sql += "rename column " + c.oldName + " to " + c.name
+			if len(constraint.primaryColumns) > 0 {
+				sql += "DROP PRIMARY KEY, "
+			}
+			if len(constraint.uniqueColumns) > 0 {
+				sql += "DROP UNIQUE (" + s.buildColumns(constraint.uniqueColumns) + "), "
+			}
+			if constraint.index != nil {
+				sql += "DROP INDEX " + constraint.index.name + ", "
+			}
+			if constraint.foreignKey != nil {
+				sql += "DROP FOREIGN KEY " + constraint.name + ", "
+			}
 		}
 	}
-	if len(s.table.columns) > 0 && len(s.table.constraints) > 0 {
-		sql += ",\n"
-	}
-	for i, c := range s.table.constraints {
-		if c.primaryColumns != nil {
-			if c.operation == "add" {
-				sql += "add constraint " + c.name + " primary key (" + s.toSQL(c.primaryColumns) + ")"
-			} else if c.operation == "drop" {
-				sql += "drop constraint " + c.name
-			}
-		}
-		if c.index != nil {
-			if c.operation == "add" {
-				sql += "create index " + c.index.name + " on " + s.tableName + " (" + s.toSQL(c.index.columns) + ")"
-			} else if c.operation == "drop" {
-				sql += "drop index " + c.index.name
-			}
-		}
-		if c.uniqueColumns != nil {
-			if c.operation == "add" {
-				sql += "add constraint " + c.name + " unique (" + s.toSQL(c.uniqueColumns) + ")"
-			} else if c.operation == "drop" {
-				sql += "drop constraint " + c.name
-			}
-		}
-		if c.foreignKey != nil {
-			if c.operation == "add" {
-				sql += "add constraint " + c.name + " foreign key (" + s.toSQL(c.foreignKey.columns) + ") references " + c.foreignKey.references
-				if c.foreignKey.onDelete != "" {
-					sql += " on delete " + c.foreignKey.onDelete
-				}
-				if c.foreignKey.onUpdate != "" {
-					sql += " on update " + c.foreignKey.onUpdate
-				}
-			} else if c.operation == "drop" {
-				sql += "drop constraint " + c.name
-			}
-		}
-		if i < len(s.table.constraints)-1 {
-			sql += ",\n"
-		}
+	// Remove trailing comma if there is any
+	if len(sql) > 0 {
+		sql = sql[:len(sql)-2]
 	}
 	return sql
 }
 
-func (s *Schema) buildDrop() string {
-	return "drop table if exists " + s.tableName + " cascade;"
+func (s *Schema) buildForeignKey(fk *foreignKey) string {
+	sql := "\nFOREIGN KEY (" + s.buildColumns(fk.columns) + ") REFERENCES " + fk.on + "(" + fk.references + ")"
+	if fk.onDelete != "" {
+		sql += " ON DELETE " + fk.onDelete
+	}
+	if fk.onUpdate != "" {
+		sql += " ON UPDATE " + fk.onUpdate
+	}
+	return sql
 }
 
-func (s *Schema) toSQL(value any) string {
-	switch v := value.(type) {
-	case string:
-		return "'" + v + "'"
-	case int:
-		return fmt.Sprintf("%d", v)
-	case []string:
-		sql := ""
-		for i, s := range v {
-			sql += s
-			if i < len(v)-1 {
-				sql += ", "
-			}
-		}
-		return sql
+func (s *Schema) buildColumns(columns []string) string {
+	sql := ""
+	for _, column := range columns {
+		sql += column + ", "
 	}
-	return ""
+	return sql[:len(sql)-2]
+}
+
+func (s *Schema) ToString() string {
+	return s.Build()
+}
+
+func (s *Schema) ToSQL() string {
+	return s.Build()
+}
+
+func (s *Schema) ToDDL() string {
+	return s.Build()
+}
+
+func (s *Schema) ToDialect(dialect string) string {
+	s.dialect = dialect
+	return s.Build()
+}
+
+func (s *Schema) ToDialectSQL(dialect string) string {
+	s.dialect = dialect
+	return s.Build()
+}
+
+func (s *Schema) ToDialectDDL(dialect string) string {
+	s.dialect = dialect
+	return s.Build()
+}
+
+func (s *Schema) ToPostgreSQL() string {
+	s.dialect = "postgresql"
+	return s.Build()
+}
+
+func (s *Schema) ToPostgreSQLSQL() string {
+	s.dialect = "postgresql"
+	return s.Build()
 }

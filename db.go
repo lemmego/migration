@@ -15,10 +15,10 @@ func NewDB(dsn string, driverName string) *sql.DB {
 		log.Fatal("Unable to connect to database: ", err.Error())
 	}
 
-	// if err := db.Ping(); err != nil {
-	// 	fmt.Printf("%+v", db)
-	// 	log.Fatal("Unable to ping the database: ", err.Error())
-	// }
+	if err := db.Ping(); err != nil {
+		fmt.Printf("%+v", db)
+		log.Fatal("Unable to ping the database: ", err.Error())
+	}
 
 	fmt.Println("Database connected!")
 

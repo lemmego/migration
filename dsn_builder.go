@@ -1,13 +1,17 @@
 package migration
 
 import (
+	"errors"
 	"log"
 	"regexp"
 	"slices"
 	"strings"
 )
 
-var supportedDialects = []string{"mysql", "postgres", "sqlite", "mssql"}
+var (
+	supportedDialects     = []string{"mysql", "postgres", "sqlite"}
+	ErrUnsupportedDialect = errors.New("unsupported dialect")
+)
 
 type DsnBuilder struct {
 	Dialect  string
@@ -29,11 +33,31 @@ type DSN struct {
 	params   string
 }
 
-func NewDsnBuilder(dialect string) *DsnBuilder {
-	if !slices.Contains(supportedDialects, strings.ToLower(dialect)) {
-		log.Fatal("Unsupported dialect")
+func (dsn *DSN) ToString() (string, error) {
+	switch dsn.dialect {
+	case DialectSQLite:
+		return dsn.GetSqliteDSN(), nil
+	case DialectMySQL:
+		return dsn.GetMysqlDSN(), nil
+	case DialectPostgres:
+		return dsn.GetPostgresDSN(), nil
+	// case "mssql":
+	// 	return dsn.GetMssqlDSN(), nil
+	default:
+		return "", ErrUnsupportedDialect
 	}
-	return &DsnBuilder{Dialect: dialect}
+}
+
+func (dsnBuilder *DsnBuilder) ToString() (string, error) {
+	dsn, err := dsnBuilder.Build()
+	if err != nil {
+		return "", err
+	}
+
+	return dsn.ToString()
+}
+func NewDsnBuilder() *DsnBuilder {
+	return &DsnBuilder{}
 }
 
 func (d *DsnBuilder) SetHost(host string) *DsnBuilder {
@@ -73,39 +97,85 @@ func (d *DsnBuilder) SetName(name string) *DsnBuilder {
 	return d
 }
 
+func (d *DsnBuilder) SetDialect(dialect string) *DsnBuilder {
+	d.Dialect = dialect
+	return d
+}
+
 func (d *DsnBuilder) SetParams(params string) *DsnBuilder {
-	d.validateParams(params)
-
-	if d.Dialect == "mysql" || d.Dialect == "mssql" {
-		d.Params = "?" + params
-	}
-
-	if d.Dialect == "postgres" {
-		split := strings.Split(params, "&")
-		d.Params = " " + strings.Join(split, " ")
-	}
+	d.Params = params
 	return d
 }
 
 // Make sure the params field conforms to this format: param1=value1&paramN=valueN
 // Or, (?:[a-zA-Z0-9]+=[a-zA-Z0-9]+)(?:&[a-zA-Z0-9]+=[a-zA-Z0-9]+)*
-func (d *DsnBuilder) validateParams(params string) {
+func (d *DsnBuilder) validateParams(params string) error {
 	if regexp.MustCompile(`^(?:[a-zA-Z0-9]+=[a-zA-Z0-9]+)(?:&[a-zA-Z0-9]+=[a-zA-Z0-9]+)*$`).MatchString(params) {
-		return
+		return nil
 	}
 
-	log.Fatal("Invalid params format")
+	return errors.New("invalid params format")
 }
 
-func (d *DsnBuilder) Build() *DSN {
+func (d *DsnBuilder) Build() (*DSN, error) {
+	dialect := strings.ToLower(d.Dialect)
+
+	if d.Dialect == "" {
+		return nil, errors.New("Dialect is required")
+	}
+
+	if !slices.Contains(supportedDialects, dialect) {
+		return nil, ErrUnsupportedDialect
+	}
+
+	if dialect != "sqlite" && d.Host == "" {
+		return nil, errors.New("DB Host is required")
+	}
+
+	if dialect != "sqlite" && d.Username == "" {
+		return nil, errors.New("DB Username is required")
+	}
+
+	if d.Name == "" {
+		return nil, errors.New("DB name is required")
+	}
+
+	if d.Dialect == "mysql" && d.Port == "" {
+		d.Port = "3306"
+	}
+
+	if d.Dialect == "postgres" && d.Port == "" {
+		d.Port = "5432"
+	}
+
+	if d.Dialect == "mssql" && d.Port == "" {
+		d.Port = "1433"
+	}
+
+	if d.Dialect == "sqlite" {
+		d.Host = d.Name
+	}
+
+	d.validateParams(d.Params)
+
+	if d.Dialect == "mysql" || d.Dialect == "mssql" {
+		d.Params = "?" + d.Params
+	}
+
+	if d.Dialect == "postgres" {
+		split := strings.Split(d.Params, "&")
+		d.Params = " " + strings.Join(split, " ")
+	}
+
 	return &DSN{
+		dialect:  dialect,
 		host:     d.Host,
 		port:     d.Port,
 		username: d.Username,
 		password: d.Password,
 		name:     d.Name,
 		params:   d.Params,
-	}
+	}, nil
 }
 
 func (d *DSN) GetMysqlDSN() string {
@@ -113,7 +183,38 @@ func (d *DSN) GetMysqlDSN() string {
 }
 
 func (d *DSN) GetPostgresDSN() string {
-	return "host=" + d.host + " port=" + d.port + " user=" + d.username + " password=" + d.password + " dbname=" + d.name + d.params
+	hostStr := ""
+	portStr := ""
+	userStr := ""
+	passStr := ""
+	dbStr := ""
+	paramsStr := ""
+
+	if d.host != "" {
+		hostStr = "host=" + d.host
+	}
+
+	if d.port != "" {
+		portStr = " port=" + d.port
+	}
+
+	if d.username != "" {
+		userStr = " user=" + d.username
+	}
+
+	if d.password != "" {
+		passStr = " password=" + d.password
+	}
+
+	if d.name != "" {
+		dbStr = " dbname=" + d.name
+	}
+
+	if d.params != "" {
+		paramsStr = d.params
+	}
+
+	return hostStr + portStr + userStr + passStr + dbStr + paramsStr
 }
 
 func (d *DSN) GetMssqlDSN() string {
