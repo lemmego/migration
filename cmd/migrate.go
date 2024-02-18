@@ -20,57 +20,96 @@ var migrateCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "create a new empty migrations file",
 	Run: func(cmd *cobra.Command, args []string) {
-		name, err := cmd.Flags().GetString("name")
-		if err != nil {
-			fmt.Println("Unable to read flag `name`", err.Error())
+		if len(args) < 1 {
+			fmt.Println("Migration name is required")
 			return
 		}
-
-		if err := migration.Create(name); err != nil {
+		name := args[0]
+		// name, err := cmd.Flags().GetString("name")
+		// if err != nil {
+		// 	fmt.Println("Unable to read flag `name`", err.Error())
+		// 	return
+		// }
+		if err := migration.CreateMigration(name); err != nil {
 			fmt.Println("Unable to create migration", err.Error())
 			return
 		}
 	},
 }
 
+func GetDriver(cmd *cobra.Command) (string, error) {
+	driver, err := cmd.Flags().GetString("driver")
+	if err != nil {
+		return "", err
+	}
+
+	if driver == "" {
+		driver = os.Getenv("DB_DRIVER")
+	}
+
+	if driver == "" {
+		return "", fmt.Errorf("driver is required")
+	}
+
+	return driver, nil
+}
+
+func GetDSN(cmd *cobra.Command, driver string) (string, error) {
+	dsnStr, err := cmd.Flags().GetString("dsn")
+	if err != nil {
+		return "", err
+	}
+
+	if dsnStr == "" {
+		dsnStr = os.Getenv("DATABASE_URL")
+	}
+
+	if dsnStr == "" {
+		ds := migration.DataSource{
+			Dialect:  driver,
+			Host:     os.Getenv("DB_HOST"),
+			Port:     os.Getenv("DB_PORT"),
+			Username: os.Getenv("DB_USERNAME"),
+			Password: os.Getenv("DB_PASSWORD"),
+			Name:     os.Getenv("DB_DATABASE"),
+			Params:   os.Getenv("DB_PARAMS"),
+		}
+		dsnStr, err = ds.String()
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return dsnStr, nil
+}
+
 var migrateUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "run up migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string
-
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
 			fmt.Println("Unable to read flag `step`", err.Error())
 			return
 		}
 
-		dsn, err = cmd.Flags().GetString("dsn")
+		driver, err := GetDriver(cmd)
 		if err != nil {
-			fmt.Println("Unable to read flag `dsn`", err.Error())
+			fmt.Println(err)
 			return
 		}
 
-		driver, err = cmd.Flags().GetString("driver")
+		dsnStr, err := GetDSN(cmd, driver)
 		if err != nil {
-			fmt.Println("Unable to read flag `driver`", err.Error())
+			fmt.Println(err)
 			return
 		}
 
-		if dsn == "" {
-			dsn = os.Getenv("DATABASE_URL")
-		}
-
-		if driver == "" {
-			driver = os.Getenv("DB_DRIVER")
-		}
-
-		if dsn == "" || driver == "" {
-			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
+		db := migration.NewDB(dsnStr, driver)
+		if db == nil {
+			fmt.Println("Unable to connect to the database")
 			return
 		}
-
-		db := migration.NewDB(dsn, driver)
 
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
@@ -83,7 +122,6 @@ var migrateUpCmd = &cobra.Command{
 			fmt.Println("Unable to run `up` migrations", err.Error())
 			return
 		}
-
 	},
 }
 
@@ -91,40 +129,29 @@ var migrateDownCmd = &cobra.Command{
 	Use:   "down",
 	Short: "run down migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string
-
 		step, err := cmd.Flags().GetInt("step")
 		if err != nil {
 			fmt.Println("Unable to read flag `step`", err.Error())
 			return
 		}
 
-		dsn, err = cmd.Flags().GetString("dsn")
+		driver, err := GetDriver(cmd)
 		if err != nil {
-			fmt.Println("Unable to read flag `dsn`", err.Error())
+			fmt.Println(err)
 			return
 		}
 
-		driver, err = cmd.Flags().GetString("driver")
+		dsnStr, err := GetDSN(cmd, driver)
 		if err != nil {
-			fmt.Println("Unable to read flag `driver`", err.Error())
+			fmt.Println(err)
 			return
 		}
 
-		if dsn == "" {
-			dsn = os.Getenv("DATABASE_URL")
-		}
-
-		if driver == "" {
-			driver = os.Getenv("DB_DRIVER")
-		}
-
-		if dsn == "" || driver == "" {
-			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
+		db := migration.NewDB(dsnStr, driver)
+		if db == nil {
+			fmt.Println("Unable to connect to the database")
 			return
 		}
-
-		db := migration.NewDB(dsn, driver)
 
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
@@ -144,35 +171,23 @@ var migrateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "display status of each migrations",
 	Run: func(cmd *cobra.Command, args []string) {
-		var dsn, driver string
-
-		dsn, err := cmd.Flags().GetString("dsn")
+		driver, err := GetDriver(cmd)
 		if err != nil {
-			fmt.Println("Unable to read flag `dsn`", err.Error())
+			fmt.Println(err)
 			return
 		}
 
-		driver, err = cmd.Flags().GetString("driver")
+		dsnStr, err := GetDSN(cmd, driver)
 		if err != nil {
-			fmt.Println("Unable to read flag `driver`", err.Error())
+			fmt.Println(err)
 			return
 		}
 
-		if dsn == "" {
-			dsn = os.Getenv("DATABASE_URL")
-		}
-
-		if driver == "" {
-			driver = os.Getenv("DB_DRIVER")
-		}
-
-		if dsn == "" || driver == "" {
-			fmt.Println("DSN and driver are required. Either pass them as flags (--dsn, --driver) or set the DATABASE_URL and DB_DRIVER environment variables.")
+		db := migration.NewDB(dsnStr, driver)
+		if db == nil {
+			fmt.Println("Unable to connect to the database")
 			return
 		}
-
-		db := migration.NewDB(dsn, driver)
-
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
 			fmt.Println("Unable to fetch migrator", err.Error())
@@ -206,8 +221,5 @@ func init() {
 	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
 	// Add "create", "status", "up" and "down" commands to the "migrate" command
-	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
-
-	// Add "migrate" command to the root command
-	rootCmd.AddCommand(MigrateCmd)
+	rootCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
 }
