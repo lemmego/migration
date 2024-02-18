@@ -163,6 +163,10 @@ E.g.:
 
 There is also a `migrate status` command to see which migrations are currently pending and/or completed.
 
+## Documentation
+
+The package documentation can be found at: https://pkg.go.dev/github.com/lemmego/migration
+
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
