@@ -29,6 +29,7 @@ type foreignKey struct {
 	onUpdate   string
 }
 
+// Column type is the column definition
 type Column struct {
 	table        *Table
 	name         string
@@ -43,6 +44,7 @@ type Column struct {
 	foreignKeys  []*foreignKey
 }
 
+// Table type is the table definition
 type Table struct {
 	dialect     string
 	name        string
@@ -51,6 +53,7 @@ type Table struct {
 	operation   string
 }
 
+// Schema type is the schema definition
 type Schema struct {
 	dialect   string
 	tableName string
@@ -66,140 +69,222 @@ func determineDialect() string {
 	return "sqlite"
 }
 
+// NewSchema creates a new schema based on the dialect provided in the environment variable DB_DRIVER
 func NewSchema() *Schema {
 	return &Schema{dialect: determineDialect()}
 }
 
-func (s *Schema) Create(tableName string, tableFunc func(t *Table) error) *Schema {
+// Create provides callback to create a new table, and returns a schema
+func Create(tableName string, tableFunc func(t *Table)) *Schema {
+	s := NewSchema()
 	s.tableName = tableName
 	s.operation = "create"
 	t := &Table{name: tableName, dialect: s.dialect}
 	s.table = t
-	if err := tableFunc(t); err != nil {
-		panic(err)
-	}
+	tableFunc(t)
 	return s
 }
 
-func (s *Schema) Table(tableName string, tableFunc func(t *Table) error) *Schema {
+// Alter provides callback to alter an existing table, and returns a schema
+func Alter(tableName string, tableFunc func(t *Table)) *Schema {
+	s := NewSchema()
 	s.tableName = tableName
 	s.operation = "alter"
 	t := &Table{name: tableName, dialect: s.dialect}
 	s.table = t
-	if err := tableFunc(t); err != nil {
-		panic(err)
-	}
+	tableFunc(t)
 	return s
 }
 
-func (s *Schema) Drop(tableName string) *Schema {
+// Drop returns a schema to drop a table
+func Drop(tableName string) *Schema {
+	s := NewSchema()
 	s.tableName = tableName
 	s.operation = "drop"
 	s.table = &Table{name: tableName, dialect: s.dialect}
 	return s
 }
 
+// HasConstraints returns true if the table has constraints
 func (t *Table) HasConstraints() bool {
 	return len(t.constraints) > 0
 }
 
+// Increments adds an auto-incrementing column to the table
 func (t *Table) Increments(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeIncrements, t.dialect))
+	c := t.AddColumn(name, NewDataType(name, ColTypeIncrements, t.dialect)).Unsigned()
 	c.incrementing = true
 	return c
 }
 
+// BigIncrements adds an auto-incrementing column to the table with big integers
 func (t *Table) BigIncrements(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeBigIncrements, t.dialect))
+	c := t.AddColumn(name, NewDataType(name, ColTypeBigIncrements, t.dialect)).Unsigned()
 	c.incrementing = true
 	return c
 }
 
-func (t *Table) Char(name string, length uint) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeChar, t.dialect).WithLength(length))
-	return c
-}
-
+// String adds a varchar column to the table
 func (t *Table) String(name string, length uint) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeVarchar, t.dialect).WithLength(length))
 	return c
 }
 
+// Text adds a text column to the table
 func (t *Table) Text(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeText, t.dialect))
 	return c
 }
 
+// TinyInt adds a tiny integer column to the table
 func (t *Table) TinyInt(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeTinyInt, t.dialect))
 	return c
 }
 
-func (t *Table) Boolean(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeBool, t.dialect))
-	return c
-}
-
+// SmallInt adds a small integer column to the table
 func (t *Table) SmallInt(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeSmallInt, t.dialect))
 	return c
 }
 
+// MediumInt adds a medium integer column to the table
 func (t *Table) MediumInt(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeMediumInt, t.dialect))
 	return c
 }
 
-func (t *Table) Int(name string) *Column {
+// Integer adds an integer column to the table
+func (t *Table) Integer(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeInt, t.dialect))
 	return c
 }
 
-func (t *Table) BigInt(name string) *Column {
+// BigInteger adds a big integer column to the table
+func (t *Table) BigInteger(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeBigInt, t.dialect))
 	return c
 }
 
-func (t *Table) UnsignedBigInt(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeUnsignedBigInt, t.dialect))
+// Binary adds a binary column to the table
+func (t *Table) Binary(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeBinary, t.dialect))
 	return c
 }
 
-func (t *Table) Float(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeFloat, t.dialect))
+// Boolean adds a boolean column to the table
+func (t *Table) Boolean(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeBool, t.dialect))
 	return c
 }
 
-func (t *Table) Double(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeDouble, t.dialect))
+// Char adds a char column to the table
+func (t *Table) Char(name string, length uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeChar, t.dialect).WithLength(length))
 	return c
 }
 
-func (t *Table) Decimal(name string, precision uint, scale uint) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeDecimal, t.dialect).WithPrecision(precision).WithScale(scale))
+// DateTimeTz adds a date time with timezone column to the table
+func (t *Table) DateTimeTz(name string, precision uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeDateTimeTz, t.dialect).WithPrecision(precision))
 	return c
 }
 
+// DateTime adds a date time column to the table
+func (t *Table) DateTime(name string, precision uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeDateTime, t.dialect).WithPrecision(precision))
+	return c
+}
+
+// Date adds a date column to the table
 func (t *Table) Date(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeDate, t.dialect))
 	return c
 }
 
-func (t *Table) DateTime(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeDateTime, t.dialect))
+// Decimal adds a decimal column to the table
+func (t *Table) Decimal(name string, precision uint, scale uint) *Column {
+	c := t.AddColumn(
+		name,
+		NewDataType(name, ColTypeDecimal, t.dialect).
+			WithPrecision(precision).
+			WithScale(scale),
+	)
 	return c
 }
 
-func (t *Table) Time(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeTime, t.dialect))
+// Double adds a double column to the table
+func (t *Table) Double(name string, precision uint, scale uint) *Column {
+	c := t.AddColumn(
+		name,
+		NewDataType(name, ColTypeDouble, t.dialect).
+			WithPrecision(precision).
+			WithScale(scale),
+	)
 	return c
 }
 
-func (t *Table) Timestamp(name string) *Column {
-	c := t.AddColumn(name, NewDataType(name, ColTypeTimestamp, t.dialect))
+// Enum adds an enum column to the table
+func (t *Table) Enum(name string, values ...string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeEnum, t.dialect).WithEnumValues(values))
 	return c
 }
 
+// UnsignedTinyInt adds an unsigned tiny integer column to the table
+func (t *Table) UnsignedBigInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeBigInt, t.dialect)).Unsigned()
+	return c
+}
+
+// UnsignedInt adds an unsigned integer column to the table
+func (t *Table) UnsignedInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeInt, t.dialect)).Unsigned()
+	return c
+}
+
+// UnsignedMediumInt adds an unsigned medium integer column to the table
+func (t *Table) UnsignedMediumInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeMediumInt, t.dialect)).Unsigned()
+	return c
+}
+
+// UnsignedSmallInt adds an unsigned small integer column to the table
+func (t *Table) UnsignedSmallInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeSmallInt, t.dialect)).Unsigned()
+	return c
+}
+
+// UnsignedTinyInt adds an unsigned tiny integer column to the table
+func (t *Table) UnsignedTinyInt(name string) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTinyInt, t.dialect)).Unsigned()
+	return c
+}
+
+// Float adds a float column to the table
+func (t *Table) Float(name string, precision uint, scale uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeFloat, t.dialect).WithPrecision(precision).WithScale(scale))
+	return c
+}
+
+// Time adds a time column to the table
+func (t *Table) Time(name string, precision uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTime, t.dialect).WithPrecision(precision))
+	return c
+}
+
+// Timestamp adds a timestamp with timezone column to the table
+func (t *Table) Timestamp(name string, precision uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTimestamp, t.dialect).WithPrecision(precision))
+	return c
+}
+
+// Timestamp adds a timestamp with timezone column to the table
+func (t *Table) TimestampTz(name string, precision uint) *Column {
+	c := t.AddColumn(name, NewDataType(name, ColTypeTimestampTz, t.dialect).WithPrecision(precision))
+	return c
+}
+
+// AddColumn adds a new column to the table
 func (t *Table) AddColumn(name string, dataType *DataType) *Column {
 	c := &Column{
 		name:      name,
@@ -211,6 +296,7 @@ func (t *Table) AddColumn(name string, dataType *DataType) *Column {
 	return c
 }
 
+// DropColumn drops a column from the table
 func (t *Table) DropColumn(name string) *Column {
 	c := &Column{
 		table:     t,
@@ -221,6 +307,7 @@ func (t *Table) DropColumn(name string) *Column {
 	return c
 }
 
+// AlterColumn alters a column in the table
 func (t *Table) AlterColumn(name string, dataType string) *Column {
 	c := &Column{
 		table:     t,
@@ -231,6 +318,7 @@ func (t *Table) AlterColumn(name string, dataType string) *Column {
 	return c
 }
 
+// RenameColumn renames a column in the table
 func (t *Table) RenameColumn(oldName string, newName string) *Column {
 	c := &Column{
 		table:     t,
@@ -242,6 +330,7 @@ func (t *Table) RenameColumn(oldName string, newName string) *Column {
 	return c
 }
 
+// PrimaryKey adds a primary key to the table
 func (t *Table) PrimaryKey(columns ...string) {
 	// panic if there is already a drop operation for primary key
 	for _, c := range t.constraints {
@@ -265,6 +354,7 @@ func (t *Table) PrimaryKey(columns ...string) {
 	t.constraints = append(t.constraints, c)
 }
 
+// DropPrimaryKey drops the primary key from the table
 func (t *Table) DropPrimaryKey() {
 	// panic if there is already an add operation for primary key
 	for _, c := range t.constraints {
@@ -279,6 +369,7 @@ func (t *Table) DropPrimaryKey() {
 	t.constraints = append(t.constraints, c)
 }
 
+// Index adds an index to the table
 func (t *Table) Index(columns ...string) {
 	indexName := ""
 	if len(columns) == 1 {
@@ -300,6 +391,7 @@ func (t *Table) Index(columns ...string) {
 	t.constraints = append(t.constraints, c)
 }
 
+// DropIndex drops an index from the table
 func (t *Table) DropIndex(indexName string) {
 	c := &constraint{
 		name:      indexName,
@@ -308,6 +400,7 @@ func (t *Table) DropIndex(indexName string) {
 	t.constraints = append(t.constraints, c)
 }
 
+// Unique adds a unique constraint to the table
 func (t *Table) Unique(columns ...string) {
 	constraintName := t.name + "_"
 	if len(columns) == 1 {
@@ -326,6 +419,7 @@ func (t *Table) Unique(columns ...string) {
 	t.constraints = append(t.constraints, c)
 }
 
+// DropUnique drops a unique constraint from the table
 func (t *Table) DropUnique(name string) {
 	c := &constraint{
 		name:      name,
@@ -334,6 +428,7 @@ func (t *Table) DropUnique(name string) {
 	t.constraints = append(t.constraints, c)
 }
 
+// ForeignKey adds a foreign key to the table
 func (t *Table) ForeignKey(columns ...string) *foreignKey {
 	fk := &foreignKey{
 		table:   t,
@@ -352,26 +447,31 @@ func (t *Table) ForeignKey(columns ...string) *foreignKey {
 	return fk
 }
 
+// DropForeignKey drops a foreign key from the table
 func (f *foreignKey) References(table string) *foreignKey {
 	f.references = table
 	return f
 }
 
+// On adds the ON clause to the foreign key
 func (f *foreignKey) On(on string) *foreignKey {
 	f.on = on
 	return f
 }
 
+// OnDelete adds the ON DELETE clause to the foreign key
 func (f *foreignKey) OnDelete(onDelete string) *foreignKey {
 	f.onDelete = onDelete
 	return f
 }
 
+// OnUpdate adds the ON UPDATE clause to the foreign key
 func (f *foreignKey) OnUpdate(onUpdate string) *foreignKey {
 	f.onUpdate = onUpdate
 	return f
 }
 
+// DropForeignKey drops a foreign key from the table
 func (t *Table) DropForeignKey(name string) {
 	c := &constraint{
 		name:      name,
@@ -380,36 +480,49 @@ func (t *Table) DropForeignKey(name string) {
 	t.constraints = append(t.constraints, c)
 }
 
+// Type adds a data type to the column
 func (c *Column) Type(dataType *DataType) *Column {
 	c.dataType = dataType
 	return c
 }
 
+// Unsigned adds the unsigned attribute to the column
+func (c *Column) Unsigned() *Column {
+	c.dataType.unsigned = true
+	return c
+}
+
+// Nullable adds the nullable attribute to the column
 func (c *Column) Nullable() *Column {
 	c.nullable = true
 	return c
 }
 
+// NotNull adds the not null attribute to the column
 func (c *Column) NotNull() *Column {
 	c.nullable = false
 	return c
 }
 
+// Default adds the default value to the column
 func (c *Column) Default(defaultValue any) *Column {
 	c.defaultValue = defaultValue
 	return c
 }
 
+// Unique adds the unique attribute to the column
 func (c *Column) Unique() *Column {
 	c.unique = true
 	return c
 }
 
+// Primary adds the primary attribute to the column
 func (c *Column) Primary() *Column {
 	c.primary = true
 	return c
 }
 
+// ForeignKey adds a foreign key to the column
 func (c *Column) ForeignKey(columns []string, references string, onDelete string, onUpdate string) *Column {
 	fk := &foreignKey{
 		columns:    columns,
@@ -421,14 +534,17 @@ func (c *Column) ForeignKey(columns []string, references string, onDelete string
 	return c
 }
 
+// Change changes the operation of the column to alter
 func (c *Column) Change() {
 	c.operation = "alter"
 }
 
+// Done returns the table that the column belongs to
 func (c *Column) Done() *Table {
 	return c.table
 }
 
+// Build returns the SQL query for the schema
 func (s *Schema) Build() string {
 	switch s.operation {
 	case "create":
@@ -637,8 +753,8 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 		}
 	}
 
-	if column.dataType != nil && column.table.dialect == DialectPostgres && (column.dataType.genericName == ColTypeIncrements || column.dataType.genericName == ColTypeBigIncrements) {
-		sql += " CHECK (" + column.name + " > 0)"
+	if column.dataType != nil {
+		sql += column.dataType.suffix
 	}
 
 	// Add trailing comma if trailingComma is true
@@ -715,39 +831,7 @@ func (s *Schema) buildColumns(columns []string) string {
 	return sql[:len(sql)-2]
 }
 
-func (s *Schema) ToString() string {
-	return s.Build()
-}
-
-func (s *Schema) ToSQL() string {
-	return s.Build()
-}
-
-func (s *Schema) ToDDL() string {
-	return s.Build()
-}
-
-func (s *Schema) ToDialect(dialect string) string {
-	s.dialect = dialect
-	return s.Build()
-}
-
-func (s *Schema) ToDialectSQL(dialect string) string {
-	s.dialect = dialect
-	return s.Build()
-}
-
-func (s *Schema) ToDialectDDL(dialect string) string {
-	s.dialect = dialect
-	return s.Build()
-}
-
-func (s *Schema) ToPostgreSQL() string {
-	s.dialect = "postgresql"
-	return s.Build()
-}
-
-func (s *Schema) ToPostgreSQLSQL() string {
-	s.dialect = "postgresql"
+// String returns the SQL query for the schema
+func (s *Schema) String() string {
 	return s.Build()
 }

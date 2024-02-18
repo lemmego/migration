@@ -10,11 +10,9 @@ func TestSQLiteIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id").Primary()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 
@@ -30,11 +28,9 @@ func TestMySQLIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nid INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id").Primary()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -48,11 +44,9 @@ func TestPostgresIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nid SERIAL NOT NULL PRIMARY KEY CHECK (id > 0));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id").Primary()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -66,11 +60,9 @@ func TestSQLiteBigIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.BigIncrements("id").Primary()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.BigIncrements("id").Primary()
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -84,11 +76,9 @@ func TestMySQLBigIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nid BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.BigIncrements("id").Primary()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.BigIncrements("id").Primary()
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -102,11 +92,9 @@ func TestPostgresBigIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nid BIGSERIAL NOT NULL PRIMARY KEY CHECK (id > 0));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.BigIncrements("id").Primary()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.BigIncrements("id").Primary()
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -120,11 +108,9 @@ func TestSQLiteBool(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nactive BOOLEAN);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Boolean("active").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Boolean("active").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -139,11 +125,9 @@ func TestMySQLBool(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nactive BOOLEAN);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Boolean("active").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Boolean("active").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -158,11 +142,9 @@ func TestPostgresBool(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nactive BOOLEAN);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Boolean("active").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Boolean("active").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -176,11 +158,9 @@ func TestSQLiteSmallInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nage SMALLINT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.SmallInt("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.SmallInt("age").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -195,11 +175,9 @@ func TestMySQLSmallInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nage SMALLINT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.SmallInt("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.SmallInt("age").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -214,11 +192,9 @@ func TestSQLiteMediumInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nage MEDIUMINT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.MediumInt("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.MediumInt("age").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -233,11 +209,9 @@ func TestMySQLMediumInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nage MEDIUMINT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.MediumInt("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.MediumInt("age").Nullable()
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -250,13 +224,12 @@ func TestMySQLMediumInt(t *testing.T) {
 
 func TestSQLiteInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (\nage INT);"
+	expected := "CREATE TABLE users (\nage INTEGER);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Int("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Integer("age").Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -271,11 +244,10 @@ func TestMySQLInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nage INT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Int("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Integer("age").Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -290,11 +262,10 @@ func TestSQLiteBigInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nage BIGINT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.BigInt("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.BigInteger("age").Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -309,11 +280,10 @@ func TestMySQLBigInt(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nage BIGINT);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.BigInt("age").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.BigInteger("age").Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -326,13 +296,12 @@ func TestMySQLBigInt(t *testing.T) {
 
 func TestSQLiteFloat(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (amount FLOAT);"
+	expected := "CREATE TABLE users (\namount FLOAT(8, 2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Float("amount").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Float("amount", 8, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -345,13 +314,12 @@ func TestSQLiteFloat(t *testing.T) {
 
 func TestMySQLFloat(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
-	expected := "CREATE TABLE users (\namount FLOAT);"
+	expected := "CREATE TABLE users (\namount FLOAT(8, 2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Float("amount").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Float("amount", 8, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -364,13 +332,12 @@ func TestMySQLFloat(t *testing.T) {
 
 func TestSQLiteDouble(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (\namount DOUBLE);"
+	expected := "CREATE TABLE users (\namount DOUBLE(10,2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Double("amount").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Double("amount", 10, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -383,13 +350,12 @@ func TestSQLiteDouble(t *testing.T) {
 
 func TestMySQLDouble(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
-	expected := "CREATE TABLE users (\namount DOUBLE);"
+	expected := "CREATE TABLE users (\namount DOUBLE(10,2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Double("amount").Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Double("amount", 10, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -404,11 +370,10 @@ func TestSQLiteDecimal(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\namount DECIMAL(10,2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Decimal("amount", 10, 2).Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Decimal("amount", 10, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -423,11 +388,10 @@ func TestPostgresDecimal(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\namount DECIMAL(10,2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Decimal("amount", 10, 2).Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Decimal("amount", 10, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -441,11 +405,10 @@ func TestMySQLDecimal(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\namount DECIMAL(10,2));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Decimal("amount", 10, 2).Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Decimal("amount", 10, 2).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -460,11 +423,10 @@ func TestSQLiteChar(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nname CHAR(100));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Char("name", 100).Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Char("name", 100).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -479,11 +441,10 @@ func TestMySQLChar(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nname CHAR(100));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Char("name", 100).Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Char("name", 100).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -498,11 +459,10 @@ func TestPostgresChar(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nname CHAR(100));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Char("name", 100).Nullable()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Char("name", 100).Nullable()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -514,19 +474,18 @@ func TestPostgresChar(t *testing.T) {
 
 func TestSQLiteForeignKey(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (\nid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,\nrole_id INT NOT NULL,\nFOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE);"
+	expected := "CREATE TABLE users (\nid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,\nrole_id INTEGER NOT NULL,\nFOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id").Primary()
-			t.Int("role_id")
-			t.ForeignKey("role_id").
-				References("id").
-				On("roles").
-				OnDelete("CASCADE").
-				OnUpdate("CASCADE")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+		t.Integer("role_id")
+		t.ForeignKey("role_id").
+			References("id").
+			On("roles").
+			OnDelete("CASCADE").
+			OnUpdate("CASCADE")
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -541,17 +500,16 @@ func TestMySQLForeignKey(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nid INT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,\nrole_id INT NOT NULL,\nFOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id").Primary()
-			t.Int("role_id")
-			t.ForeignKey("role_id").
-				References("id").
-				On("roles").
-				OnDelete("CASCADE").
-				OnUpdate("CASCADE")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+		t.Integer("role_id")
+		t.ForeignKey("role_id").
+			References("id").
+			On("roles").
+			OnDelete("CASCADE").
+			OnUpdate("CASCADE")
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -566,17 +524,16 @@ func TestPostgresForeignKey(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nid SERIAL NOT NULL PRIMARY KEY CHECK (id > 0),\nrole_id INTEGER NOT NULL,\nFOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id").Primary()
-			t.Int("role_id")
-			t.ForeignKey("role_id").
-				References("id").
-				On("roles").
-				OnDelete("CASCADE").
-				OnUpdate("CASCADE")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+		t.Integer("role_id")
+		t.ForeignKey("role_id").
+			References("id").
+			On("roles").
+			OnDelete("CASCADE").
+			OnUpdate("CASCADE")
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -590,11 +547,10 @@ func TestSQLiteUnique(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL UNIQUE);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100).Unique()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100).Unique()
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -608,11 +564,10 @@ func TestMySQLUnique(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL UNIQUE);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100).Unique()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100).Unique()
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -626,11 +581,10 @@ func TestPostgresUnique(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL UNIQUE);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100).Unique()
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100).Unique()
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -644,12 +598,11 @@ func TestSQLiteIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nINDEX users_email_index (email));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100)
-			t.Index("email")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100)
+		t.Index("email")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -663,12 +616,11 @@ func TestMySQLIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nINDEX users_email_index (email));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100)
-			t.Index("email")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100)
+		t.Index("email")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -682,12 +634,11 @@ func TestPostgresIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nINDEX users_email_index (email));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100)
-			t.Index("email")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100)
+		t.Index("email")
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -702,12 +653,11 @@ func TestSQLiteUniqueIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nUNIQUE(email));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100)
-			t.Unique("email")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100)
+		t.Unique("email")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -721,12 +671,11 @@ func TestMySQLUniqueIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nUNIQUE email_unique (email));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100)
-			t.Unique("email")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100)
+		t.Unique("email")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -740,12 +689,11 @@ func TestPostgresUniqueIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\n UNIQUE (email));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.String("email", 100)
-			t.Unique("email")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.String("email", 100)
+		t.Unique("email")
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -758,15 +706,14 @@ func TestPostgresUniqueIndex(t *testing.T) {
 
 func TestSQLitePrimaryConstraint(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (\nid INTEGER NOT NULL AUTOINCREMENT,\norg_id INT NOT NULL,\nPRIMARY KEY (id, org_id));"
+	expected := "CREATE TABLE users (\nid INTEGER NOT NULL AUTOINCREMENT,\norg_id INTEGER NOT NULL,\nPRIMARY KEY (id, org_id));"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Increments("id")
-			t.Int("org_id")
-			t.PrimaryKey("id", "org_id")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Increments("id")
+		t.Integer("org_id")
+		t.PrimaryKey("id", "org_id")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -779,12 +726,11 @@ func TestSQLiteTimestamps(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "CREATE TABLE users (\ncreated_at TIMESTAMP NOT NULL,\nupdated_at TIMESTAMP NOT NULL);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Timestamp("created_at")
-			t.Timestamp("updated_at")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Timestamp("created_at", 0)
+		t.Timestamp("updated_at", 0)
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -798,12 +744,11 @@ func TestMySQLTimestamps(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "CREATE TABLE users (\ncreated_at TIMESTAMP NOT NULL,\nupdated_at TIMESTAMP NOT NULL);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Timestamp("created_at")
-			t.Timestamp("updated_at")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Timestamp("created_at", 0)
+		t.Timestamp("updated_at", 0)
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -817,12 +762,11 @@ func TestPostgresTimestamps(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "CREATE TABLE users (\ncreated_at TIMESTAMP NOT NULL,\nupdated_at TIMESTAMP NOT NULL);"
 
-	schema := NewSchema().
-		Create("users", func(t *Table) error {
-			t.Timestamp("created_at")
-			t.Timestamp("updated_at")
-			return nil
-		}).Build()
+	schema := Create("users", func(t *Table) {
+		t.Timestamp("created_at", 0)
+		t.Timestamp("updated_at", 0)
+
+	}).Build()
 
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
@@ -837,11 +781,10 @@ func TestSQLiteRenameColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "ALTER TABLE users RENAME COLUMN username TO name;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.RenameColumn("username", "name")
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.RenameColumn("username", "name")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -855,11 +798,10 @@ func TestMySQLRenameColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "ALTER TABLE users RENAME COLUMN username TO name;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.RenameColumn("username", "name")
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.RenameColumn("username", "name")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -873,11 +815,10 @@ func TestPostgresRenameColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "ALTER TABLE users RENAME COLUMN username TO name;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.RenameColumn("username", "name")
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.RenameColumn("username", "name")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -891,11 +832,10 @@ func TestSQLiteAlterColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "ALTER TABLE users ALTER COLUMN name VARCHAR(100) NOT NULL;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.String("name", 100).Change()
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.String("name", 100).Change()
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -909,11 +849,10 @@ func TestMySQLAlterColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "ALTER TABLE users MODIFY COLUMN name VARCHAR(100) NOT NULL;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.String("name", 100).Change()
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.String("name", 100).Change()
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -926,11 +865,58 @@ func TestPostgresAlterColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
 	expected := "ALTER TABLE users ALTER COLUMN name VARCHAR(100) NOT NULL;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.String("name", 100).Change()
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.String("name", 100).Change()
+
+	}).Build()
+
+	normalizedExpected := normalizeSchema(expected)
+	normalizedSchema := normalizeSchema(schema)
+	if normalizedSchema != normalizedExpected {
+		t.Errorf("Expected schema to be %s, got %s", expected, schema)
+	}
+}
+
+func TestSQLiteAddColumnToExistingTable(t *testing.T) {
+	os.Setenv("DB_DRIVER", "sqlite")
+	expected := "ALTER TABLE users ADD COLUMN age INTEGER;"
+
+	schema := Alter("users", func(t *Table) {
+		t.Integer("age").Nullable()
+
+	}).Build()
+
+	normalizedExpected := normalizeSchema(expected)
+	normalizedSchema := normalizeSchema(schema)
+	if normalizedSchema != normalizedExpected {
+		t.Errorf("Expected schema to be %s, got %s", expected, schema)
+	}
+}
+
+func TestMySQLAddColumnToExistingTable(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+	expected := "ALTER TABLE users ADD COLUMN age INT;"
+
+	schema := Alter("users", func(t *Table) {
+		t.Integer("age").Nullable()
+
+	}).Build()
+
+	normalizedExpected := normalizeSchema(expected)
+	normalizedSchema := normalizeSchema(schema)
+	if normalizedSchema != normalizedExpected {
+		t.Errorf("Expected schema to be %s, got %s", expected, schema)
+	}
+}
+
+func TestPostgresAddColumnToExistingTable(t *testing.T) {
+	os.Setenv("DB_DRIVER", "postgres")
+	expected := "ALTER TABLE users ADD COLUMN age INTEGER;"
+
+	schema := Alter("users", func(t *Table) {
+		t.Integer("age").Nullable()
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -943,11 +929,10 @@ func TestSQLiteDropColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "ALTER TABLE users DROP COLUMN username;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.DropColumn("username")
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.DropColumn("username")
+
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -961,11 +946,9 @@ func TestMySQLDropColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "ALTER TABLE users DROP COLUMN username;"
 
-	schema := NewSchema().
-		Table("users", func(t *Table) error {
-			t.DropColumn("username")
-			return nil
-		}).Build()
+	schema := Alter("users", func(t *Table) {
+		t.DropColumn("username")
+	}).Build()
 
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
@@ -978,7 +961,7 @@ func TestMySQLDropColumn(t *testing.T) {
 func TestSQLiteDropTable(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
 	expected := "DROP TABLE users;"
-	schema := NewSchema().Drop("users").Build()
+	schema := Drop("users").Build()
 
 	if schema != expected {
 		t.Errorf("\nExpected:\n %s \nGot:\n %s", expected, schema)
@@ -988,7 +971,7 @@ func TestSQLiteDropTable(t *testing.T) {
 func TestMySQLDropTable(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
 	expected := "DROP TABLE users;"
-	schema := NewSchema().Drop("users").Build()
+	schema := Drop("users").Build()
 
 	if schema != expected {
 		t.Errorf("\nExpected:\n %s \nGot:\n %s", expected, schema)

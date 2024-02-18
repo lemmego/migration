@@ -6,6 +6,7 @@ import (
 	"log"
 )
 
+// NewDB creates a new database connection
 func NewDB(dsn string, driverName string) *sql.DB {
 	fmt.Println("Connecting to database...")
 	fmt.Println("DSN:", dsn)
@@ -16,7 +17,6 @@ func NewDB(dsn string, driverName string) *sql.DB {
 	}
 
 	if err := db.Ping(); err != nil {
-		fmt.Printf("%+v", db)
 		log.Fatal("Unable to ping the database: ", err.Error())
 	}
 

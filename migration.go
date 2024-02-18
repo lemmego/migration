@@ -9,18 +9,19 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 	"html/template"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-var dbDriver string
-
 //go:embed template.txt
 var stub string
 
-// Migration ..
+var dbDialect string
+
+// Migration represents a migration data type
 type Migration struct {
 	Version string
 	Up      func(*sql.Tx) error
@@ -29,7 +30,7 @@ type Migration struct {
 	done bool
 }
 
-// Migrator ..
+// Migrator is a struct that holds the migrations
 type Migrator struct {
 	db         *sql.DB
 	Versions   []string
@@ -41,11 +42,12 @@ var migrator = &Migrator{
 	Migrations: map[string]*Migration{},
 }
 
+// GetMigrator returns the migrator
 func GetMigrator() *Migrator {
 	return migrator
 }
 
-// AddMigration ..
+// AddMigration adds a migration to the migrator
 func (m *Migrator) AddMigration(mg *Migration) {
 	// Add the migration to the hash with version as key
 	m.Migrations[mg.Version] = mg
@@ -64,13 +66,13 @@ func (m *Migrator) AddMigration(mg *Migration) {
 	m.Versions[index] = mg.Version
 }
 
-// Init ..
-func Init(db *sql.DB, driverName string) (*Migrator, error) {
-	if driverName != "mysql" && driverName != "mariadb" && driverName != "sqlite3" && driverName != "postgres" {
+// Init populates the fields of Migrator and returns it
+func Init(db *sql.DB, dialect string) (*Migrator, error) {
+	if dialect != DialectSQLite && dialect != DialectMySQL && dialect != DialectPostgres {
 		return nil, errors.New("unsupported driver")
 	}
 
-	dbDriver = driverName
+	dbDialect = dialect
 	migrator.db = db
 
 	// Create `schema_migrations` table to remember which migrations were executed.
@@ -106,12 +108,12 @@ func Init(db *sql.DB, driverName string) (*Migrator, error) {
 	return migrator, err
 }
 
-// Up ..
+// Up method runs the migrations which have not yet been run
 func (m *Migrator) Up(step int) error {
 	var bindPlaceHolders string
-	if dbDriver == "mysql" || dbDriver == "mariadb" || dbDriver == "sqlite3" {
+	if dbDialect == DialectMySQL || dbDialect == DialectSQLite {
 		bindPlaceHolders = "?, ?"
-	} else if dbDriver == "postgres" {
+	} else if dbDialect == DialectPostgres {
 		bindPlaceHolders = "$1, $2"
 	} else {
 		return errors.New("unsupported driver")
@@ -169,12 +171,12 @@ func (m *Migrator) Up(step int) error {
 	return nil
 }
 
-// Down ..
+// Down migration rolls back the last batch of migrations
 func (m *Migrator) Down(step int) error {
 	var bindPlaceHolder string
-	if dbDriver == "mysql" {
+	if dbDialect == "mysql" {
 		bindPlaceHolder = "?"
-	} else if dbDriver == "postgres" {
+	} else if dbDialect == "postgres" {
 		bindPlaceHolder = "$1"
 	} else {
 		return errors.New("unsupported driver")
@@ -226,7 +228,7 @@ func (m *Migrator) Down(step int) error {
 	return nil
 }
 
-// Status .
+// Status checks which migrations have run and which have not
 func (m *Migrator) MigrationStatus() error {
 	for _, v := range m.Versions {
 		mg := m.Migrations[v]
@@ -241,8 +243,8 @@ func (m *Migrator) MigrationStatus() error {
 	return nil
 }
 
-// Create ..
-func Create(name string) error {
+// CreateMigration creates a migration file
+func CreateMigration(name string) error {
 	migrationsDir := "./cmd/migrations"
 	version := time.Now().Format("20060102150405")
 

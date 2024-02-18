@@ -16,51 +16,39 @@ To install the migration package, run:
 
 ## Usage
 
-This package requires DSN (Data Source Name) and database driver name in order to function properly. There are two ways you can provide these. Either via `DATABASE_URL` and `DB_DRIVER` environment variables:
+This package resolves the DSN (Data Source Name) from the following env variables:
 
 ```env
-DATABASE_URL=username:password@protocol(address)/dbname?param=value
 DB_DRIVER=mysql
+DB_HOST=localhost
+DB_PORT=3306
+DB_DATABASE=test
+DB_USERNAME=root
+DB_PASSWORD=
+DB_PARAMS=charset=utf8mb4&collation=utf8mb4_unicode_ci
 ```
 
-Or, via command line flags:
-
-```sh
-go run . migrate up --dsn="username:password@protocol(address)/dbname?param=value" --driver=mysql
-```
-
-_[A Note About DSN: The DSN should be compatible with the database driver you wish to use. Refer to the corresponding driver's documentation to see what's the accepted format for your particular db driver. In the examples below, the "https://github.com/go-sql-driver/mysql" driver will be used and their format will be followed.]_
-
-In all the examples below, we will assume that the values are coming from the environment variables.
-
-In your go mod enabled application, import the db driver, godotenv (if you prefer env vars over flags) and the "github.com/lemmego/migration/cmd" package. Then add the `cmd.Execute()` statement.
+The supported `DB_DRIVER` values are `sqlite`, `mysql` and `postgres`
 
 ```go
-// main.go
+// projectroot/cmd/migrations/main.go
 
 package main
 
 import (
-	"log"
-
-	// _ "github.com/lib/pq"
-	_ "github.com/go-sql-driver/mysql"
-	// _ "packagename/migrations" // This will be uncommented later
-
-	"github.com/joho/godotenv"
-	"github.com/lemmego/migration/cmd"
+  "github.com/joho/godotenv"
+  "github.com/lemmego/migration/cmd"
 )
 
 func main() {
-	err := godotenv.Load()
-  	if err != nil {
-    		log.Fatal("Error loading .env file")
-  	}
-	cmd.Execute()
+  if err := godotenv.Load(); err != nil {
+    panic(err)
+  }
+  cmd.Execute()
 }
 ```
 
-Then run `go run . migrate create -n create_users_table` to create a sample migration. A migration file will be created inside the `migrations` directory of the project root. If the `migrations` directory is not present in your project root, the `migrate create ...` command will create one for you. Open the migration file and populate the `up()` and `down()` method like this:
+Then run `go run ./cmd/migratations create create_users_table` to create a sample migration. A migration file will be created inside the `projectroot/cmd/migrations/` directory. If the `migrations` directory is not present in your project root, the `migrate create ...` command will create one for you. Open the migration file and populate the `up()` and `down()` method like this:
 
 ```go
 // 20220729200658_create_users_table.go
@@ -97,13 +85,53 @@ func mig_20220729200658_create_users_table_down(tx *sql.Tx) error {
 }
 ```
 
-Now open the `main.go` file and uncomment (or add, if it's missing) the following blank import statement:
+Optionally, you could also use the db agnostic schema builder API:
 
 ```go
-// _ "packagename/migrations"
-```
+// 20220729200658_create_users_table.go
 
-This blank import will make sure that migration files residing inside the `migrations/` directory will execute. Replace "packagename" with your package name (can be found in the topmost line your go.mod file).
+package migrations
+
+import (
+	"database/sql"
+	"github.com/lemmego/migration"
+)
+
+func init() {
+	migration.GetMigrator().AddMigration(&migration.Migration{
+		Version: "20220729200658",
+		Up:      mig_20220729200658_create_users_table_up,
+		Down:    mig_20220729200658_create_users_table_down,
+	})
+}
+
+func mig_20220729200658_create_users_table_up(tx *sql.Tx) error {
+  schema := migration.Create("users", func(t *migration.Table) {
+    t.BigIncrements("id").Primary()
+    t.Integer("org_id")
+    t.String("first_name", 255)
+    t.String("last_name", 255)
+    t.String("email", 255).Unique()
+    t.String("password", 255)
+    t.DateTime("created_at", 0).Default("now()")
+    t.DateTime("updated_at", 0).Default("now()")
+  }).Build()
+
+  if _, err := tx.Exec(schema); err != nil {
+    return err
+  }
+
+  return nil
+}
+
+func mig_20220729200658_create_users_table_down(tx *sql.Tx) error {
+  schema := migration.Drop("users").Build()
+  if _, err := tx.Exec(schema); err != nil {
+    return err
+  }
+  return nil
+}
+```
 
 Once you've made sure that the expected environment variables are present in your `.env` file, you can run `go run . migrate up`
 
@@ -134,22 +162,6 @@ E.g.:
 `go run . migrate down --step=1`
 
 There is also a `migrate status` command to see which migrations are currently pending and/or completed.
-
-**Note**: _If your app is already using the Cobra package, you can add the `MigrateCmd` to your root command instead of importing it to your main.go file:_
-
-```go
-// cmd/root.go
-
-import (
-	migrateCmd "github.com/lemmego/migration/cmd"
-)
-rootCmd.AddCommand(migrateCmd.MigrateCmd)
-```
-
-## Credits
-
-This package is an enhancement and modification of this blog post by Praveen:
-https://techinscribed.com/create-db-migrations-tool-in-go-from-scratch/
 
 ## Contributing
 

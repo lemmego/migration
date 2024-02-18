@@ -20,12 +20,17 @@ var migrateCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "create a new empty migrations file",
 	Run: func(cmd *cobra.Command, args []string) {
-		name, err := cmd.Flags().GetString("name")
-		if err != nil {
-			fmt.Println("Unable to read flag `name`", err.Error())
+		if len(args) < 1 {
+			fmt.Println("Migration name is required")
 			return
 		}
-		if err := migration.Create(name); err != nil {
+		name := args[0]
+		// name, err := cmd.Flags().GetString("name")
+		// if err != nil {
+		// 	fmt.Println("Unable to read flag `name`", err.Error())
+		// 	return
+		// }
+		if err := migration.CreateMigration(name); err != nil {
 			fmt.Println("Unable to create migration", err.Error())
 			return
 		}
@@ -60,15 +65,16 @@ func GetDSN(cmd *cobra.Command, driver string) (string, error) {
 	}
 
 	if dsnStr == "" {
-		dsnStr, err = migration.NewDsnBuilder().
-			SetHost(os.Getenv("DB_HOST")).
-			SetPort(os.Getenv("DB_PORT")).
-			SetUsername(os.Getenv("DB_USERNAME")).
-			SetPassword(os.Getenv("DB_PASSWORD")).
-			SetName(os.Getenv("DB_DATABASE")).
-			SetParams(os.Getenv("DB_PARAMS")).
-			SetDialect(driver).
-			ToString()
+		ds := migration.DataSource{
+			Dialect:  driver,
+			Host:     os.Getenv("DB_HOST"),
+			Port:     os.Getenv("DB_PORT"),
+			Username: os.Getenv("DB_USERNAME"),
+			Password: os.Getenv("DB_PASSWORD"),
+			Name:     os.Getenv("DB_DATABASE"),
+			Params:   os.Getenv("DB_PARAMS"),
+		}
+		dsnStr, err = ds.String()
 		if err != nil {
 			return "", err
 		}
