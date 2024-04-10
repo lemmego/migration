@@ -227,7 +227,7 @@ func TestSQLiteInt(t *testing.T) {
 	expected := "CREATE TABLE users (\nage INTEGER);"
 
 	schema := Create("users", func(t *Table) {
-		t.Integer("age").Nullable()
+		t.Int("age").Nullable()
 
 	}).Build()
 
@@ -245,7 +245,7 @@ func TestMySQLInt(t *testing.T) {
 	expected := "CREATE TABLE users (\nage INT);"
 
 	schema := Create("users", func(t *Table) {
-		t.Integer("age").Nullable()
+		t.Int("age").Nullable()
 
 	}).Build()
 
@@ -263,7 +263,7 @@ func TestSQLiteBigInt(t *testing.T) {
 	expected := "CREATE TABLE users (\nage BIGINT);"
 
 	schema := Create("users", func(t *Table) {
-		t.BigInteger("age").Nullable()
+		t.BigInt("age").Nullable()
 
 	}).Build()
 
@@ -281,7 +281,7 @@ func TestMySQLBigInt(t *testing.T) {
 	expected := "CREATE TABLE users (\nage BIGINT);"
 
 	schema := Create("users", func(t *Table) {
-		t.BigInteger("age").Nullable()
+		t.BigInt("age").Nullable()
 
 	}).Build()
 
@@ -478,7 +478,7 @@ func TestSQLiteForeignKey(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
-		t.Integer("role_id")
+		t.Int("role_id")
 		t.ForeignKey("role_id").
 			References("id").
 			On("roles").
@@ -502,7 +502,7 @@ func TestMySQLForeignKey(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
-		t.Integer("role_id")
+		t.Int("role_id")
 		t.ForeignKey("role_id").
 			References("id").
 			On("roles").
@@ -526,7 +526,7 @@ func TestPostgresForeignKey(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
-		t.Integer("role_id")
+		t.Int("role_id")
 		t.ForeignKey("role_id").
 			References("id").
 			On("roles").
@@ -710,7 +710,7 @@ func TestSQLitePrimaryConstraint(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id")
-		t.Integer("org_id")
+		t.Int("org_id")
 		t.PrimaryKey("id", "org_id")
 
 	}).Build()
@@ -882,7 +882,7 @@ func TestSQLiteAddColumnToExistingTable(t *testing.T) {
 	expected := "ALTER TABLE users ADD COLUMN age INTEGER;"
 
 	schema := Alter("users", func(t *Table) {
-		t.Integer("age").Nullable()
+		t.Int("age").Nullable()
 
 	}).Build()
 
@@ -898,7 +898,7 @@ func TestMySQLAddColumnToExistingTable(t *testing.T) {
 	expected := "ALTER TABLE users ADD COLUMN age INT;"
 
 	schema := Alter("users", func(t *Table) {
-		t.Integer("age").Nullable()
+		t.Int("age").Nullable()
 
 	}).Build()
 
@@ -914,7 +914,7 @@ func TestPostgresAddColumnToExistingTable(t *testing.T) {
 	expected := "ALTER TABLE users ADD COLUMN age INTEGER;"
 
 	schema := Alter("users", func(t *Table) {
-		t.Integer("age").Nullable()
+		t.Int("age").Nullable()
 
 	}).Build()
 

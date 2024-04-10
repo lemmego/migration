@@ -154,14 +154,14 @@ func (t *Table) MediumInt(name string) *Column {
 	return c
 }
 
-// Integer adds an integer column to the table
-func (t *Table) Integer(name string) *Column {
+// Int adds an integer column to the table
+func (t *Table) Int(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeInt, t.dialect))
 	return c
 }
 
-// BigInteger adds a big integer column to the table
-func (t *Table) BigInteger(name string) *Column {
+// BigInt adds a big integer column to the table
+func (t *Table) BigInt(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeBigInt, t.dialect))
 	return c
 }
