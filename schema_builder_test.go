@@ -655,7 +655,7 @@ func TestSQLiteUniqueIndex(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)
-		t.Unique("email")
+		t.UniqueKey("email")
 
 	}).Build()
 
@@ -673,7 +673,7 @@ func TestMySQLUniqueIndex(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)
-		t.Unique("email")
+		t.UniqueKey("email")
 
 	}).Build()
 
@@ -691,7 +691,7 @@ func TestPostgresUniqueIndex(t *testing.T) {
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)
-		t.Unique("email")
+		t.UniqueKey("email")
 
 	}).Build()
 

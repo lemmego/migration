@@ -400,8 +400,8 @@ func (t *Table) DropIndex(indexName string) {
 	t.constraints = append(t.constraints, c)
 }
 
-// Unique adds a unique constraint to the table
-func (t *Table) Unique(columns ...string) {
+// UniqueKey adds a unique constraint to the table
+func (t *Table) UniqueKey(columns ...string) {
 	constraintName := t.name + "_"
 	if len(columns) == 1 {
 		constraintName = columns[0] + "_unique"
@@ -419,8 +419,8 @@ func (t *Table) Unique(columns ...string) {
 	t.constraints = append(t.constraints, c)
 }
 
-// DropUnique drops a unique constraint from the table
-func (t *Table) DropUnique(name string) {
+// DropUniqueKey drops a unique constraint from the table
+func (t *Table) DropUniqueKey(name string) {
 	c := &constraint{
 		name:      name,
 		operation: "drop",
@@ -519,18 +519,6 @@ func (c *Column) Unique() *Column {
 // Primary adds the primary attribute to the column
 func (c *Column) Primary() *Column {
 	c.primary = true
-	return c
-}
-
-// ForeignKey adds a foreign key to the column
-func (c *Column) ForeignKey(columns []string, references string, onDelete string, onUpdate string) *Column {
-	fk := &foreignKey{
-		columns:    columns,
-		references: references,
-		onDelete:   onDelete,
-		onUpdate:   onUpdate,
-	}
-	c.foreignKeys = append(c.foreignKeys, fk)
 	return c
 }
 
