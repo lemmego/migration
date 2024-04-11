@@ -96,7 +96,7 @@ var dataTypes = []DataType{
 func NewDataType(columnName string, name string, dialect string) *DataType {
 	for _, dataType := range dataTypes {
 		if dataType.genericName == name {
-			dataType.SetDialet(dialect)
+			dataType.SetDialect(dialect)
 			dataType.SetColumnName(columnName)
 			dataType.AddSuffixes()
 			return &dataType
@@ -130,8 +130,8 @@ func (dataType *DataType) WithEnumValues(enumValues []string) *DataType {
 	return dataType
 }
 
-// SetDialet sets the dialect of the column
-func (dataType *DataType) SetDialet(dialect string) {
+// SetDialect sets the dialect of the column
+func (dataType *DataType) SetDialect(dialect string) {
 	dataType.dialect = dialect
 }
 

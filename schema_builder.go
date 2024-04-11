@@ -230,7 +230,7 @@ func (t *Table) Enum(name string, values ...string) *Column {
 	return c
 }
 
-// UnsignedTinyInt adds an unsigned tiny integer column to the table
+// UnsignedBigTInt adds an unsigned tiny integer column to the table
 func (t *Table) UnsignedBigInt(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeBigInt, t.dialect)).Unsigned()
 	return c
