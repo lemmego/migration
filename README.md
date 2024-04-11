@@ -108,7 +108,7 @@ func init() {
 func mig_20220729200658_create_users_table_up(tx *sql.Tx) error {
   schema := migration.Create("users", func(t *migration.Table) {
     t.BigIncrements("id").Primary()
-    t.Integer("org_id")
+    t.Int("org_id")
     t.String("first_name", 255)
     t.String("last_name", 255)
     t.String("email", 255).Unique()
