@@ -479,7 +479,7 @@ func TestSQLiteForeignKey(t *testing.T) {
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
 		t.Int("role_id")
-		t.ForeignKey("role_id").
+		t.Foreign("role_id").
 			References("id").
 			On("roles").
 			OnDelete("CASCADE").
@@ -503,7 +503,7 @@ func TestMySQLForeignKey(t *testing.T) {
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
 		t.Int("role_id")
-		t.ForeignKey("role_id").
+		t.Foreign("role_id").
 			References("id").
 			On("roles").
 			OnDelete("CASCADE").
@@ -527,7 +527,7 @@ func TestPostgresForeignKey(t *testing.T) {
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
 		t.Int("role_id")
-		t.ForeignKey("role_id").
+		t.Foreign("role_id").
 			References("id").
 			On("roles").
 			OnDelete("CASCADE").
@@ -538,6 +538,40 @@ func TestPostgresForeignKey(t *testing.T) {
 	// Normalize both the expected and generated schema strings
 	normalizedExpected := normalizeSchema(expected)
 	normalizedSchema := normalizeSchema(schema)
+	if normalizedSchema != normalizedExpected {
+		t.Errorf("Expected schema to be %s, got %s", expected, schema)
+	}
+}
+
+func TestSQLiteConstrained(t *testing.T) {
+	os.Setenv("DB_DRIVER", "sqlite")
+	expected := "CREATE TABLE users (\norg_id INTEGER NOT NULL,\nFOREIGN KEY (org_id) REFERENCES orgs(id));"
+
+	schema := Create("users", func(t *Table) {
+		t.ForeignID("org_id").Constrained()
+	}).Build()
+
+	normalizedExpected := normalizeSchema(expected)
+	normalizedSchema := normalizeSchema(schema)
+
+	if normalizedSchema != normalizedExpected {
+		t.Errorf("Expected schema to be %s, got %s", expected, schema)
+	}
+}
+
+func TestSQLiteConstrainedFunc(t *testing.T) {
+	os.Setenv("DB_DRIVER", "sqlite")
+	expected := "CREATE TABLE users (\norg_id INTEGER NOT NULL,\nCONSTRAINT f_orgs_id FOREIGN KEY (org_id) REFERENCES orgs(id));"
+
+	schema := Create("users", func(t *Table) {
+		t.ForeignID("org_id").ConstrainedFunc(func(t *Table) (table string, indexName string) {
+			return "orgs", "f_orgs_id"
+		})
+	}).Build()
+
+	normalizedExpected := normalizeSchema(expected)
+	normalizedSchema := normalizeSchema(schema)
+
 	if normalizedSchema != normalizedExpected {
 		t.Errorf("Expected schema to be %s, got %s", expected, schema)
 	}
