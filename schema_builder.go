@@ -2,7 +2,9 @@ package migration
 
 import (
 	"fmt"
+	"github.com/gertd/go-pluralize"
 	"os"
+	"strings"
 )
 
 type constraint struct {
@@ -21,6 +23,7 @@ type index struct {
 }
 
 type foreignKey struct {
+	name       string
 	table      *Table
 	columns    []string
 	references string
@@ -41,7 +44,7 @@ type Column struct {
 	incrementing bool
 	oldName      string
 	operation    string
-	foreignKeys  []*foreignKey
+	// foreignKeys  []*foreignKey
 }
 
 // Table type is the table definition
@@ -428,34 +431,69 @@ func (t *Table) DropUniqueKey(name string) {
 	t.constraints = append(t.constraints, c)
 }
 
-// ForeignKey adds a foreign key to the table
-func (t *Table) ForeignKey(columns ...string) *foreignKey {
+// ForeignID accepts an id column that references the primary column of another table
+func (t *Table) ForeignID(column string) *foreignKey {
 	fk := &foreignKey{
-		table:   t,
-		columns: columns,
+		table:      t,
+		columns:    []string{column},
+		references: "id",
 	}
-	fkName := ""
-	for _, column := range columns {
-		fkName += column + "_"
-	}
+	fkName := column
 	c := &constraint{
 		name:       fkName + "_fkey",
 		operation:  "add",
 		foreignKey: fk,
 	}
+	// fk.name = c.name
+	t.constraints = append(t.constraints, c)
+	t.AddColumn(column, NewDataType(column, ColTypeBigIncrements, t.dialect))
+
+	return fk
+}
+
+// Foreign adds a foreign key to the table
+func (t *Table) Foreign(columns ...string) *foreignKey {
+	fk := &foreignKey{
+		table:   t,
+		columns: columns,
+	}
+	fkName := strings.Join(columns, "_")
+	c := &constraint{
+		name:       fkName + "_fkey",
+		operation:  "add",
+		foreignKey: fk,
+	}
+	// fk.name = c.name
 	t.constraints = append(t.constraints, c)
 	return fk
 }
 
-// DropForeignKey drops a foreign key from the table
-func (f *foreignKey) References(table string) *foreignKey {
-	f.references = table
+// Constrained is shorthand of .References("id").On("pluralized_table_name")
+func (f *foreignKey) Constrained() *foreignKey {
+	f.references = "id"
+	referencedTable := guessPluralizedTableNameFromColumnName(f.columns[0])
+	f.on = referencedTable
 	return f
 }
 
-// On adds the ON clause to the foreign key
-func (f *foreignKey) On(on string) *foreignKey {
-	f.on = on
+// ConstrainedFunc sets the table and name of the foreign key
+func (f *foreignKey) ConstrainedFunc(fn func(t *Table) (table, indexName string)) *foreignKey {
+	table, indexName := fn(f.table)
+	f.name = indexName
+	f.references = "id"
+	f.on = table
+	return f
+}
+
+// References sets the column that the foreign key references
+func (f *foreignKey) References(column string) *foreignKey {
+	f.references = column
+	return f
+}
+
+// On sets the table that the foreign key references
+func (f *foreignKey) On(table string) *foreignKey {
+	f.on = table
 	return f
 }
 
@@ -735,11 +773,13 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 	if column.table.dialect == DialectMySQL && column.incrementing {
 		sql += " AUTO_INCREMENT"
 	}
-	if len(column.foreignKeys) > 0 {
-		for _, fk := range column.foreignKeys {
-			sql += ", " + s.buildForeignKey(fk)
-		}
-	}
+
+	// This column level foreign key is not being executed at all.
+	// if len(column.foreignKeys) > 0 {
+	// 	for _, fk := range column.foreignKeys {
+	// 		sql += ", " + s.buildForeignKey(fk)
+	// 	}
+	// }
 
 	if column.dataType != nil {
 		sql += column.dataType.suffix
@@ -801,7 +841,14 @@ func (s *Schema) buildConstraints() string {
 }
 
 func (s *Schema) buildForeignKey(fk *foreignKey) string {
-	sql := "\nFOREIGN KEY (" + s.buildColumns(fk.columns) + ") REFERENCES " + fk.on + "(" + fk.references + ")"
+	sql := ""
+	if fk.name != "" {
+		sql += "\nCONSTRAINT " + fk.name + " "
+	} else {
+		sql += "\n"
+	}
+
+	sql += "FOREIGN KEY (" + s.buildColumns(fk.columns) + ") REFERENCES " + fk.on + "(" + fk.references + ")"
 	if fk.onDelete != "" {
 		sql += " ON DELETE " + fk.onDelete
 	}
@@ -822,4 +869,16 @@ func (s *Schema) buildColumns(columns []string) string {
 // String returns the SQL query for the schema
 func (s *Schema) String() string {
 	return s.Build()
+}
+
+func guessPluralizedTableNameFromColumnName(columnName string) string {
+	pluralize := pluralize.NewClient()
+	if strings.HasSuffix(columnName, "id") {
+		nameParts := strings.Split(columnName, "_")
+		if len(nameParts) > 1 {
+			return pluralize.Plural(nameParts[len(nameParts)-2])
+		}
+		return pluralize.Plural(nameParts[0])
+	}
+	return pluralize.Plural(columnName)
 }
