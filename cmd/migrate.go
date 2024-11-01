@@ -8,14 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var MigrateCmd = &cobra.Command{
-	Use:   "migrate",
-	Short: "DB Schema Migration Tool",
-	Run: func(cmd *cobra.Command, args []string) {
-
-	},
-}
-
 var migrateCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "create a new empty migrations file",
@@ -221,5 +213,5 @@ func init() {
 	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
 	// Add "create", "status", "up" and "down" commands to the "migrate" command
-	rootCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
+	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
 }
