@@ -7,7 +7,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "migration",
+	Use:   "",
 	Short: "Database Migration Utility",
 }
 
