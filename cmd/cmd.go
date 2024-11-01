@@ -6,14 +6,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "",
-	Short: "Database Migration Utility",
+var MigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "DB Schema Migration Tool",
 }
 
 // Execute ..
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	if err := MigrateCmd.Execute(); err != nil {
 		log.Fatalln(err.Error())
 	}
 }
