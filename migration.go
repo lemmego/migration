@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -243,17 +244,34 @@ func (m *Migrator) MigrationStatus() error {
 	return nil
 }
 
+// guessPackageNameFromMigrationsDir guesses the package name from a given migrations dir path.
+func guessPackageNameFromMigrationsDir(migrationsDir string) string {
+	splitPath := strings.Split(migrationsDir, "/")
+	return splitPath[len(splitPath)-1]
+}
+
 // CreateMigration creates a migration file
 func CreateMigration(name string) error {
-	migrationsDir := "./cmd/migrations"
+	migrationsDir := os.Getenv("MIGRATIONS_DIR")
+
+	if migrationsDir != "" {
+		migrationsDir = strings.TrimSuffix(migrationsDir, "/")
+	} else {
+		migrationsDir = "./cmd/migrations"
+	}
+
+	packageName := guessPackageNameFromMigrationsDir(migrationsDir)
+
 	version := time.Now().Format("20060102150405")
 
 	in := struct {
-		Version string
-		Name    string
+		Version     string
+		Name        string
+		PackageName string
 	}{
-		Version: version,
-		Name:    name,
+		Version:     version,
+		Name:        name,
+		PackageName: packageName,
 	}
 
 	var out bytes.Buffer
