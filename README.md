@@ -6,7 +6,7 @@ A simple to use database schema migration tool for go applications.
 
 Open your favorite terminal app and cd into your go module enabled project root:
 
-`cd packagename`
+`cd projectroot`
 
 [Replace "packagename" with your package's name]
 
@@ -26,18 +26,22 @@ DB_DATABASE=test
 DB_USERNAME=root
 DB_PASSWORD=
 DB_PARAMS=charset=utf8mb4&collation=utf8mb4_unicode_ci
+MIGRATIONS_DIR="./cmd/migrations" # Optional
 ```
 
 The supported `DB_DRIVER` values are `sqlite`, `mysql` and `postgres`
 
 ```go
-// projectroot/cmd/migrations/main.go
+// projectroot/main.go
+// Or,
+// projectroot/cmd/myapp/main.go
 
 package main
 
 import (
   "github.com/joho/godotenv"
   "github.com/lemmego/migration/cmd"
+  _ "projectroot/cmd/migrations"
 )
 
 func main() {
@@ -48,7 +52,17 @@ func main() {
 }
 ```
 
-Then run `go run ./cmd/migratations create create_users_table` to create a sample migration. A migration file will be created inside the `projectroot/cmd/migrations/` directory. If the `migrations` directory is not present in your project root, the `migrate create ...` command will create one for you. Open the migration file and populate the `up()` and `down()` method like this:
+Next, to create a sample migration, run:
+
+`go run . create create_users_table` (If the main.go is located in projectroot/main.go)
+
+Or,
+
+`go run ./cmd/myapp create create_users_table` (If the main.go is located in projectroot/cmd/myapp/main.go)
+
+**Note:** For all the examples (_migrate up, migrate down, migrate status_) below, we will assume that the `main.go` is located in `projectroot/main.go` and the `go run . <subcommand>` command will be used. Replace this with `go run ./cmd/myapp <subcommand>` if your main.go is in `projectroot/cmd/myapp/main.go`
+
+If you didn't provide a `MIGRATIONS_DIR` env variable, A migration file will be created inside the `projectroot/cmd/migrations/` directory. If the directory is not present in your project root, the `migrate create ...` command will create one for you. Open the migration file and populate the `up()` and `down()` method like this:
 
 ```go
 // 20220729200658_create_users_table.go
@@ -163,6 +177,60 @@ E.g.:
 `go run . migrate down --step=1`
 
 There is also a `migrate status` command to see which migrations are currently pending and/or completed.
+
+### Adding "migrate" command to an existing command:
+If your project already has a command, say `rootCmd`, you could add the `MigrateCmd` to that command to take full control of the package:
+
+```go
+package mypackage
+
+import "github.com/spf13/cobra"
+import "github.com/lemmego/migration/cmd"
+
+var rootCmd = &cobra.Command{}
+
+func init() {
+    rootCmd.AddCommand(cmd.MigrateCmd)
+	rootCmd.Execute()
+}
+```
+
+### Renaming package for self-contained binary:
+By default, the migration files will be created within the `./cmd/migrations` directory. You can override the directory with the `MIGRATIONS_DIR` env variable. The package name of the migration files will follow the Go's convention of adopting the package name according to the directory the files are in, meaning if they are generated in a "migrations" directory, the package name will be "migrations". If you would like the package name to be `"main"` so that you can deploy it as a self-contained binary, follow these two steps:
+
+1. Rename the package name of each migration files to `package main`
+2. Add the following `main.go` file to the same directory where migrations are generated:
+
+```go
+// Assuming your generated files are in the projectroot/cmd/migrations dir:
+// projectroot/cmd/migrations/main.go
+
+package main
+
+import (
+	"github.com/joho/godotenv"
+	"github.com/lemmego/migration/cmd"
+)
+
+func main() {
+	if err := godotenv.Load(); err != nil {
+		panic(err)
+	}
+	cmd.Execute()
+}
+```
+
+Now the package `./cmd/migrations` is ready to be built and deployed as an independent binary.
+
+Build:
+
+`go build ./cmd/migrations`
+
+Run:
+
+`./migrations migrate create/up/down/status`
+
+
 
 ## Documentation
 
