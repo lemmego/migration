@@ -8,13 +8,13 @@ import (
 )
 
 var (
-	supportedDialects     = []string{DialectSQLite, DialectMySQL, DialectPostgres /*, "mssql"*/}
-	ErrUnsupportedDialect = errors.New("unsupported dialect")
+	supportedDialects     = []string{DriverSQLite, DriverMySQL, DriverPostgres /*, "mssql"*/}
+	ErrUnsupportedDialect = errors.New("unsupported driver")
 )
 
 // DataSource holds the necessary fields for a DSN (data source name)
 type DataSource struct {
-	Dialect  string
+	Driver   string
 	Host     string
 	Port     string
 	Username string
@@ -25,21 +25,21 @@ type DataSource struct {
 
 // String returns the string representation of the data source
 func (ds *DataSource) String() (string, error) {
-	dialect := strings.ToLower(ds.Dialect)
+	dialect := strings.ToLower(ds.Driver)
 
-	if ds.Dialect == "" {
-		return "", errors.New("Dialect is required")
+	if ds.Driver == "" {
+		return "", errors.New("driver is required")
 	}
 
 	if !slices.Contains(supportedDialects, dialect) {
 		return "", ErrUnsupportedDialect
 	}
 
-	if dialect != DialectSQLite && ds.Host == "" {
+	if dialect != DriverSQLite && ds.Host == "" {
 		return "", errors.New("DB Host is required")
 	}
 
-	if dialect != DialectSQLite && ds.Username == "" {
+	if dialect != DriverSQLite && ds.Username == "" {
 		return "", errors.New("DB Username is required")
 	}
 
@@ -47,39 +47,39 @@ func (ds *DataSource) String() (string, error) {
 		return "", errors.New("DB Name is required")
 	}
 
-	if ds.Dialect == DialectMySQL && ds.Port == "" {
+	if ds.Driver == DriverMySQL && ds.Port == "" {
 		ds.Port = "3306"
 	}
 
-	if ds.Dialect == DialectPostgres && ds.Port == "" {
+	if ds.Driver == DriverPostgres && ds.Port == "" {
 		ds.Port = "5432"
 	}
 
-	// if d.Dialect == "mssql" && d.Port == "" {
+	// if d.Driver == "mssql" && d.Port == "" {
 	// 	d.Port = "1433"
 	// }
 
-	if ds.Dialect == DialectSQLite {
+	if ds.Driver == DriverSQLite {
 		ds.Host = ds.Name
 	}
 
 	ds.validateParams(ds.Params)
 
-	if ds.Dialect == DialectMySQL /*|| d.Dialect == "mssql"*/ {
+	if ds.Driver == DriverMySQL /*|| d.Driver == "mssql"*/ {
 		ds.Params = "?" + ds.Params
 	}
 
-	if ds.Dialect == DialectPostgres {
+	if ds.Driver == DriverPostgres {
 		split := strings.Split(ds.Params, "&")
 		ds.Params = " " + strings.Join(split, " ")
 	}
 
-	switch ds.Dialect {
-	case DialectSQLite:
+	switch ds.Driver {
+	case DriverSQLite:
 		return ds.getSqliteDSN(), nil
-	case DialectMySQL:
+	case DriverMySQL:
 		return ds.getMysqlDSN(), nil
-	case DialectPostgres:
+	case DriverPostgres:
 		return ds.getPostgresDSN(), nil
 	// case "mssql":
 	// 	return dsn.getMssqlDSN(), nil

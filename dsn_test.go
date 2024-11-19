@@ -3,7 +3,7 @@ package migration
 import "testing"
 
 func TestDSNBuilderReturnsErrorForUnsupportedDialect(t *testing.T) {
-	_, err := (&DataSource{Dialect: "unsupported"}).String()
+	_, err := (&DataSource{Driver: "unsupported"}).String()
 
 	if err != ErrUnsupportedDialect {
 		t.Errorf("Expected %s, got %s", ErrUnsupportedDialect, err)
@@ -13,9 +13,9 @@ func TestDSNBuilderReturnsErrorForUnsupportedDialect(t *testing.T) {
 func TestToStringSQLite(t *testing.T) {
 	expected := "file::memory:?cache=shared"
 	dsn, err := (&DataSource{
-		Dialect: "sqlite",
-		Name:    ":memory:",
-		Params:  "cache=shared",
+		Driver: "sqlite",
+		Name:   ":memory:",
+		Params: "cache=shared",
 	}).String()
 
 	if err != nil {
@@ -36,7 +36,7 @@ func TestToStringMySql(t *testing.T) {
 		Password: "password",
 		Name:     "test",
 		Params:   "parseTime=true",
-		Dialect:  "mysql",
+		Driver:   "mysql",
 	}).String()
 
 	if dsn != expected {
@@ -53,7 +53,7 @@ func TestToStringPostgres(t *testing.T) {
 		Password: "password",
 		Name:     "test",
 		Params:   "sslmode=disable",
-		Dialect:  "postgres",
+		Driver:   "postgres",
 	}).String()
 
 	if err != nil {

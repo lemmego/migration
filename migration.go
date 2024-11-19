@@ -69,7 +69,7 @@ func (m *Migrator) AddMigration(mg *Migration) {
 
 // Init populates the fields of Migrator and returns it
 func Init(db *sql.DB, dialect string) (*Migrator, error) {
-	if dialect != DialectSQLite && dialect != DialectMySQL && dialect != DialectPostgres {
+	if dialect != DriverSQLite && dialect != DriverMySQL && dialect != DriverPostgres {
 		return nil, errors.New("unsupported driver")
 	}
 
@@ -112,9 +112,9 @@ func Init(db *sql.DB, dialect string) (*Migrator, error) {
 // Up method runs the migrations which have not yet been run
 func (m *Migrator) Up(step int) error {
 	var bindPlaceHolders string
-	if dbDialect == DialectMySQL || dbDialect == DialectSQLite {
+	if dbDialect == DriverMySQL || dbDialect == DriverSQLite {
 		bindPlaceHolders = "?, ?"
-	} else if dbDialect == DialectPostgres {
+	} else if dbDialect == DriverPostgres {
 		bindPlaceHolders = "$1, $2"
 	} else {
 		return errors.New("unsupported driver")
@@ -175,9 +175,9 @@ func (m *Migrator) Up(step int) error {
 // Down migration rolls back the last batch of migrations
 func (m *Migrator) Down(step int) error {
 	var bindPlaceHolder string
-	if dbDialect == "mysql" {
+	if dbDialect == DriverMySQL || dbDialect == DriverSQLite {
 		bindPlaceHolder = "?"
-	} else if dbDialect == "postgres" {
+	} else if dbDialect == DriverPostgres {
 		bindPlaceHolder = "$1"
 	} else {
 		return errors.New("unsupported driver")

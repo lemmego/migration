@@ -72,7 +72,7 @@ func determineDialect() string {
 	return "sqlite"
 }
 
-// NewSchema creates a new schema based on the dialect provided in the environment variable DB_DRIVER
+// NewSchema creates a new schema based on the driver provided in the environment variable DB_DRIVER
 func NewSchema() *Schema {
 	return &Schema{dialect: determineDialect()}
 }
@@ -275,13 +275,13 @@ func (t *Table) Time(name string, precision uint) *Column {
 	return c
 }
 
-// Timestamp adds a timestamp with timezone column to the table
+// Timestamp adds a timestamp column to the table
 func (t *Table) Timestamp(name string, precision uint) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeTimestamp, t.dialect).WithPrecision(precision))
 	return c
 }
 
-// Timestamp adds a timestamp with timezone column to the table
+// TimestampTz adds a timestamp with timezone column to the table
 func (t *Table) TimestampTz(name string, precision uint) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeTimestampTz, t.dialect).WithPrecision(precision))
 	return c
@@ -585,11 +585,11 @@ func (s *Schema) Build() string {
 
 func (s *Schema) buildCreate() string {
 	switch s.dialect {
-	case DialectSQLite:
+	case DriverSQLite:
 		return s.buildCreateSQLite()
-	case DialectMySQL:
+	case DriverMySQL:
 		return s.buildCreateMySQL()
-	case DialectPostgres:
+	case DriverPostgres:
 		return s.buildCreatePostgreSQL()
 	}
 	return ""
@@ -597,11 +597,11 @@ func (s *Schema) buildCreate() string {
 
 func (s *Schema) buildAlter() string {
 	switch s.dialect {
-	case DialectSQLite:
+	case DriverSQLite:
 		return s.buildAlterSQLite()
-	case DialectMySQL:
+	case DriverMySQL:
 		return s.buildAlterMySQL()
-	case DialectPostgres:
+	case DriverPostgres:
 		return s.buildAlterPostgreSQL()
 	}
 	return ""
@@ -609,11 +609,11 @@ func (s *Schema) buildAlter() string {
 
 func (s *Schema) buildDrop() string {
 	switch s.dialect {
-	case DialectSQLite:
+	case DriverSQLite:
 		return s.buildDropSQLite()
-	case DialectMySQL:
+	case DriverMySQL:
 		return s.buildDropMySQL()
-	case DialectPostgres:
+	case DriverPostgres:
 		return s.buildDropPostgreSQL()
 	}
 	return ""
@@ -749,6 +749,26 @@ func (s *Schema) buildDropPostgreSQL() string {
 }
 
 func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
+	hasCompositePrimaryKey := false
+
+	if column.incrementing && column.table.dialect == DriverSQLite {
+		for _, c := range column.table.constraints {
+			if len(c.primaryColumns) > 1 {
+				for _, primaryColumn := range c.primaryColumns {
+					c.uniqueColumns = append(c.uniqueColumns, primaryColumn)
+				}
+				c.primaryColumns = []string{}
+				hasCompositePrimaryKey = true
+				break
+			}
+		}
+		if hasCompositePrimaryKey {
+			fmt.Println(fmt.Sprintf("[Warning: %s column is marked as incremental, however a composite primary key is provided.\n"+
+				"The provided primary columns have been set as unique and the incremental column is set as primary.]", column.name))
+			column.primary = true
+		}
+	}
+
 	sql := "\n" + column.name + " "
 
 	if column.dataType != nil {
@@ -767,10 +787,10 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 	if column.primary {
 		sql += " PRIMARY KEY"
 	}
-	if column.table.dialect == DialectSQLite && column.incrementing {
+	if column.table.dialect == DriverSQLite && column.incrementing {
 		sql += " AUTOINCREMENT"
 	}
-	if column.table.dialect == DialectMySQL && column.incrementing {
+	if column.table.dialect == DriverMySQL && column.incrementing {
 		sql += " AUTO_INCREMENT"
 	}
 
@@ -803,11 +823,11 @@ func (s *Schema) buildConstraints() string {
 			}
 			if len(constraint.uniqueColumns) > 0 {
 				prefix := ""
-				if s.dialect == DialectPostgres {
+				if s.dialect == DriverPostgres {
 					prefix = "UNIQUE "
-				} else if s.dialect == DialectMySQL {
+				} else if s.dialect == DriverMySQL {
 					prefix = "UNIQUE " + constraint.name + " "
-				} else if s.dialect == DialectSQLite {
+				} else if s.dialect == DriverSQLite {
 					prefix = "UNIQUE "
 				}
 				sql += prefix + "(" + s.buildColumns(constraint.uniqueColumns) + "), "

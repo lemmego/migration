@@ -7,8 +7,9 @@ import (
 )
 
 var MigrateCmd = &cobra.Command{
-	Use:   "migrate",
-	Short: "DB Schema Migration Tool",
+	Use:     "migrate",
+	Short:   "DB Schema Migration Tool",
+	Version: "0.1.7",
 }
 
 // Execute ..
