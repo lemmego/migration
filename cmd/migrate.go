@@ -58,7 +58,7 @@ func GetDSN(cmd *cobra.Command, driver string) (string, error) {
 
 	if dsnStr == "" {
 		ds := migration.DataSource{
-			Dialect:  driver,
+			Driver:   driver,
 			Host:     os.Getenv("DB_HOST"),
 			Port:     os.Getenv("DB_PORT"),
 			Username: os.Getenv("DB_USERNAME"),

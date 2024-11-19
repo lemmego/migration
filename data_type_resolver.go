@@ -3,9 +3,9 @@ package migration
 import "fmt"
 
 const (
-	DialectSQLite   = "sqlite"
-	DialectMySQL    = "mysql"
-	DialectPostgres = "postgres"
+	DriverSQLite   = "sqlite"
+	DriverMySQL    = "mysql"
+	DriverPostgres = "postgres"
 
 	ColTypeIncrements    = "increments"
 	ColTypeBigIncrements = "bigIncrements"
@@ -43,7 +43,7 @@ const (
 // DataType represents a column type
 type DataType struct {
 	columnName   string
-	dialect      string
+	driver       string
 	genericName  string
 	sqliteName   string
 	mysqlName    string
@@ -130,9 +130,9 @@ func (dataType *DataType) WithEnumValues(enumValues []string) *DataType {
 	return dataType
 }
 
-// SetDialect sets the dialect of the column
+// SetDialect sets the driver of the column
 func (dataType *DataType) SetDialect(dialect string) {
-	dataType.dialect = dialect
+	dataType.driver = dialect
 }
 
 // SetColumnName sets the column name of the column
@@ -142,31 +142,31 @@ func (dataType *DataType) SetColumnName(columnName string) {
 
 // ToString returns the string representation of the column type
 func (dataType *DataType) ToString() string {
-	if dataType.dialect == "" {
-		panic("Dialect not set")
+	if dataType.driver == "" {
+		panic("Driver not set")
 	}
 
 	columnType := ""
-	switch dataType.dialect {
-	case DialectSQLite:
+	switch dataType.driver {
+	case DriverSQLite:
 		columnType = dataType.sqliteName
-	case DialectMySQL:
+	case DriverMySQL:
 		columnType = dataType.mysqlName
-	case DialectPostgres:
+	case DriverPostgres:
 		columnType = dataType.postgresName
 	default:
-		panic("Unsupported dialect")
+		panic("Unsupported driver")
 	}
 
 	if dataType.columnName == "" {
 		panic("Column name not set")
 	}
 
-	if dataType.dialect == DialectMySQL && dataType.unsigned {
+	if dataType.driver == DriverMySQL && dataType.unsigned {
 		columnType = columnType + " UNSIGNED"
 	}
 
-	if dataType.dialect == DialectMySQL && dataType.genericName == ColTypeEnum {
+	if dataType.driver == DriverMySQL && dataType.genericName == ColTypeEnum {
 		return fmt.Sprintf("%s(%s)", columnType, dataType.enumValues)
 	}
 
@@ -191,13 +191,13 @@ func (dataType *DataType) ToString() string {
 
 // AddSuffixes adds suffixes to the column type
 func (dataType *DataType) AddSuffixes() *DataType {
-	// If the dialect is postgres and the column type is unsigned, add a check constraint
-	if dataType.dialect == DialectPostgres && dataType.unsigned {
+	// If the driver is postgres and the column type is unsigned, add a check constraint
+	if dataType.driver == DriverPostgres && dataType.unsigned {
 		dataType.AppendSufix(fmt.Sprintf("CHECK (%s > 0)", dataType.columnName))
 	}
 
-	// If the dialect is postgres and the column type is enum or set, add a check constraint
-	if dataType.dialect == DialectPostgres && len(dataType.enumValues) > 0 && (dataType.genericName == ColTypeEnum || dataType.genericName == ColTypeSet) {
+	// If the driver is postgres and the column type is enum or set, add a check constraint
+	if dataType.driver == DriverPostgres && len(dataType.enumValues) > 0 && (dataType.genericName == ColTypeEnum || dataType.genericName == ColTypeSet) {
 		dataType.AppendSufix(fmt.Sprintf("CHECK (%s IN (%s))", dataType.columnName, dataType.enumValues))
 	}
 

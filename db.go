@@ -11,6 +11,10 @@ func NewDB(dsn string, driverName string) *sql.DB {
 	fmt.Println("Connecting to database...")
 	fmt.Println("DSN:", dsn)
 
+	if driverName == "sqlite" {
+		driverName = "sqlite3"
+	}
+
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		log.Fatal("Unable to connect to database: ", err.Error())
