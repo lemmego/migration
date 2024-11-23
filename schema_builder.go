@@ -753,6 +753,11 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 
 	if column.incrementing && column.table.dialect == DriverSQLite {
 		for _, c := range column.table.constraints {
+			if len(c.primaryColumns) == 1 {
+				c.primaryColumns = []string{}
+				break
+			}
+
 			if len(c.primaryColumns) > 1 {
 				for _, primaryColumn := range c.primaryColumns {
 					c.uniqueColumns = append(c.uniqueColumns, primaryColumn)
@@ -762,11 +767,12 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 				break
 			}
 		}
+
 		if hasCompositePrimaryKey {
 			fmt.Println(fmt.Sprintf("[Warning: %s column is marked as incremental, however a composite primary key is provided.\n"+
 				"The provided primary columns have been set as unique and the incremental column is set as primary.]", column.name))
-			column.primary = true
 		}
+		column.primary = true
 	}
 
 	sql := "\n" + column.name + " "
