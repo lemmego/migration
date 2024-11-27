@@ -755,6 +755,7 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 		for _, c := range column.table.constraints {
 			if len(c.primaryColumns) == 1 {
 				c.primaryColumns = []string{}
+				trailingComma = false
 				break
 			}
 
@@ -763,6 +764,7 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 					c.uniqueColumns = append(c.uniqueColumns, primaryColumn)
 				}
 				c.primaryColumns = []string{}
+				trailingComma = false
 				hasCompositePrimaryKey = true
 				break
 			}
