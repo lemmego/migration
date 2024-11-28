@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gertd/go-pluralize"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -621,25 +622,103 @@ func (s *Schema) buildDrop() string {
 
 func (s *Schema) buildCreateSQLite() string {
 	sql := "CREATE TABLE " + s.tableName + " ("
+
+	// SQLite requires incrementing column to be a primary key.
+	// If the user doesn't mark the incremental column as a
+	// primary column, we will do it for them.
+	//
+	// If there is an incremental column, however the primary
+	// key is a multi-column composite key (e.g. t.PrimaryKey("id", "org_id")),
+	// then we will set the incremental key as a primary column,
+	// and convert the composite primary key into a composite unique key.
+	// This is to keep the schema compatible across different dbs.
+	// Misleading key type? - Yes. Gets the job done? - Also yes.
+
+	hasCompositePrimaryKey := false
+	hasIncrementingColumn := false
 	for index, column := range s.table.columns {
-		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
-			sql += s.buildColumn(column, false)
+		if column.incrementing {
+			hasIncrementingColumn = true
+			for _, c := range column.table.constraints {
+				if len(c.primaryColumns) == 1 {
+					c.primaryColumns = []string{}
+					break
+				}
+
+				if len(c.primaryColumns) > 1 {
+					for _, primaryColumn := range c.primaryColumns {
+						c.uniqueColumns = append(c.uniqueColumns, primaryColumn)
+					}
+					c.primaryColumns = []string{}
+					hasCompositePrimaryKey = true
+					break
+				}
+			}
+
+			if hasCompositePrimaryKey {
+				fmt.Println(fmt.Sprintf("[Warning: %s column is marked as incremental, however a composite primary key is provided.\n"+
+					"The provided primary columns have been set as a unique key and the incremental column has been set as the primary key.]", column.name))
+			}
+			column.primary = true
+		}
+
+		if index == len(s.table.columns)-1 && hasIncrementingColumn && !s.HasUniqueConstraints() && !s.HasForeignKeys() {
+			sql += strings.TrimSuffix(s.buildColumn(column), ", ")
 		} else {
-			sql += s.buildColumn(column, true)
+			sql += s.buildColumn(column)
 		}
 	}
+
 	sql += s.buildConstraints()
-	sql += ");"
+	sql += "\n);"
 	return sql
+}
+
+func (s *Schema) HasUniqueConstraints() bool {
+	return slices.ContainsFunc(s.table.constraints, func(c *constraint) bool {
+		return len(c.uniqueColumns) > 0
+	})
+}
+
+func (s *Schema) HasForeignKeys() bool {
+	return slices.ContainsFunc(s.table.constraints, func(c *constraint) bool {
+		return c.foreignKey != nil
+	})
+}
+
+func (s *Schema) HasNonPrimaryConstraints() bool {
+	return slices.ContainsFunc(s.table.constraints, func(c *constraint) bool {
+		return len(c.uniqueColumns) > 0 || c.foreignKey != nil
+	})
+}
+
+func (s *Schema) HasPrimaryKeyOnTable() bool {
+	for _, constraint := range s.table.constraints {
+		if len(constraint.primaryColumns) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *Schema) HasCompositePrimaryKey() bool {
+	for _, constraint := range s.table.constraints {
+		if len(constraint.primaryColumns) > 1 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Schema) buildCreateMySQL() string {
 	sql := "CREATE TABLE " + s.tableName + " ("
 	for index, column := range s.table.columns {
 		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
-			sql += s.buildColumn(column, false)
+			sql += strings.TrimSuffix(s.buildColumn(column), ",")
 		} else {
-			sql += s.buildColumn(column, true)
+			sql += s.buildColumn(column)
 		}
 	}
 	sql += s.buildConstraints()
@@ -651,9 +730,9 @@ func (s *Schema) buildCreatePostgreSQL() string {
 	sql := "CREATE TABLE " + s.tableName + " ("
 	for index, column := range s.table.columns {
 		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
-			sql += s.buildColumn(column, false)
+			sql += strings.TrimSuffix(s.buildColumn(column), ",")
 		} else {
-			sql += s.buildColumn(column, true)
+			sql += s.buildColumn(column)
 		}
 	}
 	sql += s.buildConstraints()
@@ -666,9 +745,9 @@ func (s *Schema) buildAlterSQLite() string {
 	for index, column := range s.table.columns {
 		columnStr := ""
 		if index == len(s.table.columns)-1 {
-			columnStr = s.buildColumn(column, false)
+			columnStr = strings.TrimSuffix(s.buildColumn(column), ",")
 		} else {
-			columnStr = s.buildColumn(column, true)
+			columnStr = s.buildColumn(column)
 		}
 		switch column.operation {
 		case "add":
@@ -691,9 +770,9 @@ func (s *Schema) buildAlterMySQL() string {
 	for index, column := range s.table.columns {
 		columnStr := ""
 		if index == len(s.table.columns)-1 {
-			columnStr = s.buildColumn(column, false)
+			columnStr = strings.TrimSuffix(s.buildColumn(column), ",")
 		} else {
-			columnStr = s.buildColumn(column, true)
+			columnStr = s.buildColumn(column)
 		}
 		switch column.operation {
 		case "add":
@@ -716,9 +795,9 @@ func (s *Schema) buildAlterPostgreSQL() string {
 	for index, column := range s.table.columns {
 		columnStr := ""
 		if index == len(s.table.columns)-1 {
-			columnStr = s.buildColumn(column, false)
+			columnStr = strings.TrimSuffix(s.buildColumn(column), ",")
 		} else {
-			columnStr = s.buildColumn(column, true)
+			columnStr = s.buildColumn(column)
 		}
 		switch column.operation {
 		case "add":
@@ -748,35 +827,7 @@ func (s *Schema) buildDropPostgreSQL() string {
 	return "DROP TABLE " + s.tableName + ";"
 }
 
-func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
-	hasCompositePrimaryKey := false
-
-	if column.incrementing && column.table.dialect == DriverSQLite {
-		for _, c := range column.table.constraints {
-			if len(c.primaryColumns) == 1 {
-				c.primaryColumns = []string{}
-				trailingComma = false
-				break
-			}
-
-			if len(c.primaryColumns) > 1 {
-				for _, primaryColumn := range c.primaryColumns {
-					c.uniqueColumns = append(c.uniqueColumns, primaryColumn)
-				}
-				c.primaryColumns = []string{}
-				trailingComma = false
-				hasCompositePrimaryKey = true
-				break
-			}
-		}
-
-		if hasCompositePrimaryKey {
-			fmt.Println(fmt.Sprintf("[Warning: %s column is marked as incremental, however a composite primary key is provided.\n"+
-				"The provided primary columns have been set as unique and the incremental column is set as primary.]", column.name))
-		}
-		column.primary = true
-	}
-
+func (s *Schema) buildColumn(column *Column) string {
 	sql := "\n" + column.name + " "
 
 	if column.dataType != nil {
@@ -813,12 +864,7 @@ func (s *Schema) buildColumn(column *Column, trailingComma bool) string {
 		sql += column.dataType.suffix
 	}
 
-	// Add trailing comma if trailingComma is true
-	if trailingComma {
-		return sql + ", "
-	}
-
-	return sql
+	return sql + ", "
 }
 
 func (s *Schema) buildConstraints() string {
