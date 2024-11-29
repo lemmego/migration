@@ -669,6 +669,10 @@ func (s *Schema) buildCreateSQLite() string {
 		}
 	}
 
+	if !s.table.HasConstraints() && strings.HasSuffix(sql, ", ") {
+		sql = strings.TrimSuffix(sql, ", ")
+	}
+
 	sql += s.buildConstraints()
 	sql += "\n);"
 	return sql
