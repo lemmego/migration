@@ -7,14 +7,15 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	_ "github.com/glebarez/go-sqlite"
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/lib/pq"
 	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "github.com/glebarez/go-sqlite"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 )
 
 //go:embed template.txt
@@ -120,7 +121,11 @@ func (m *Migrator) Up(step int) error {
 		return errors.New("unsupported driver")
 	}
 
-	tx, err := m.db.BeginTx(context.TODO(), &sql.TxOptions{})
+	// Use background context for transaction
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := m.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -175,14 +180,20 @@ func (m *Migrator) Up(step int) error {
 // Down migration rolls back the last batch of migrations
 func (m *Migrator) Down(step int) error {
 	var bindPlaceHolder string
-	if dbDialect == DriverMySQL || dbDialect == DriverSQLite {
+	switch dbDialect {
+	case DriverMySQL, DriverSQLite:
 		bindPlaceHolder = "?"
-	} else if dbDialect == DriverPostgres {
+	case DriverPostgres:
 		bindPlaceHolder = "$1"
-	} else {
+	default:
 		return errors.New("unsupported driver")
 	}
-	tx, err := m.db.BeginTx(context.TODO(), &sql.TxOptions{})
+
+	// Use background context for transaction
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := m.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
