@@ -38,6 +38,8 @@ const (
 	ColTypeLongBlob      = "longBlob"
 	ColTypeEnum          = "enum"
 	ColTypeSet           = "set"
+	ColTypeUUID          = "uuid"
+	ColTypeULID          = "ulid"
 )
 
 // DataType represents a column type
@@ -90,6 +92,8 @@ var dataTypes = []DataType{
 	{genericName: ColTypeLongBlob, sqliteName: "LONGBLOB", mysqlName: "LONGBLOB", postgresName: "BYTEA"},
 	{genericName: ColTypeEnum, sqliteName: "TEXT", mysqlName: "ENUM", postgresName: "TEXT"},
 	{genericName: ColTypeSet, sqliteName: "TEXT", mysqlName: "SET", postgresName: "TEXT"},
+	{genericName: ColTypeUUID, sqliteName: "TEXT", mysqlName: "CHAR", postgresName: "UUID"},
+	{genericName: ColTypeULID, sqliteName: "TEXT", mysqlName: "CHAR", postgresName: "CHAR"},
 }
 
 // NewDataType creates a new DataType

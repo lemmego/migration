@@ -740,7 +740,7 @@ func TestPostgresUniqueIndex(t *testing.T) {
 
 func TestSQLitePrimaryConstraint(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (\nid INTEGER NOT NULL AUTOINCREMENT,\norg_id INTEGER NOT NULL,\nPRIMARY KEY (id, org_id));"
+	expected := "CREATE TABLE users (\nid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,\norg_id INTEGER NOT NULL,\nUNIQUE (id, org_id));"
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id")

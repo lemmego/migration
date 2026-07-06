@@ -140,6 +140,26 @@ func (t *Table) Text(name string) *Column {
 	return c
 }
 
+// UUID adds a UUID column to the table.
+// PostgreSQL uses the native UUID type, MySQL uses CHAR(36), SQLite uses TEXT.
+func (t *Table) UUID(name string) *Column {
+	dt := NewDataType(name, ColTypeUUID, t.dialect)
+	if t.dialect == DriverMySQL {
+		dt.length = 36
+	}
+	return t.AddColumn(name, dt)
+}
+
+// ULID adds a ULID column to the table.
+// ULIDs are 26-character Crockford base32 encoded identifiers.
+func (t *Table) ULID(name string) *Column {
+	dt := NewDataType(name, ColTypeULID, t.dialect)
+	if t.dialect == DriverMySQL || t.dialect == DriverPostgres {
+		dt.length = 26
+	}
+	return t.AddColumn(name, dt)
+}
+
 // TinyInt adds a tiny integer column to the table
 func (t *Table) TinyInt(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeTinyInt, t.dialect))
@@ -720,7 +740,7 @@ func (s *Schema) buildCreateMySQL() string {
 	sql := "CREATE TABLE " + s.tableName + " ("
 	for index, column := range s.table.columns {
 		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
-			sql += strings.TrimSuffix(s.buildColumn(column), ",")
+			sql += strings.TrimSuffix(s.buildColumn(column), ", ")
 		} else {
 			sql += s.buildColumn(column)
 		}
@@ -734,7 +754,7 @@ func (s *Schema) buildCreatePostgreSQL() string {
 	sql := "CREATE TABLE " + s.tableName + " ("
 	for index, column := range s.table.columns {
 		if index == len(s.table.columns)-1 && !s.table.HasConstraints() {
-			sql += strings.TrimSuffix(s.buildColumn(column), ",")
+			sql += strings.TrimSuffix(s.buildColumn(column), ", ")
 		} else {
 			sql += s.buildColumn(column)
 		}
@@ -749,7 +769,7 @@ func (s *Schema) buildAlterSQLite() string {
 	for index, column := range s.table.columns {
 		columnStr := ""
 		if index == len(s.table.columns)-1 {
-			columnStr = strings.TrimSuffix(s.buildColumn(column), ",")
+			columnStr = strings.TrimSuffix(s.buildColumn(column), ", ")
 		} else {
 			columnStr = s.buildColumn(column)
 		}
@@ -774,7 +794,7 @@ func (s *Schema) buildAlterMySQL() string {
 	for index, column := range s.table.columns {
 		columnStr := ""
 		if index == len(s.table.columns)-1 {
-			columnStr = strings.TrimSuffix(s.buildColumn(column), ",")
+			columnStr = strings.TrimSuffix(s.buildColumn(column), ", ")
 		} else {
 			columnStr = s.buildColumn(column)
 		}
@@ -799,7 +819,7 @@ func (s *Schema) buildAlterPostgreSQL() string {
 	for index, column := range s.table.columns {
 		columnStr := ""
 		if index == len(s.table.columns)-1 {
-			columnStr = strings.TrimSuffix(s.buildColumn(column), ",")
+			columnStr = strings.TrimSuffix(s.buildColumn(column), ", ")
 		} else {
 			columnStr = s.buildColumn(column)
 		}
