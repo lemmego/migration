@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -20,8 +21,6 @@ import (
 
 //go:embed template.txt
 var stub string
-
-var dbDialect string
 
 // Migration represents a migration data type
 type Migration struct {
@@ -34,7 +33,9 @@ type Migration struct {
 
 // Migrator is a struct that holds the migrations
 type Migrator struct {
+	mu         sync.Mutex
 	db         *sql.DB
+	dialect    string
 	Versions   []string
 	Migrations map[string]*Migration
 }
@@ -51,6 +52,9 @@ func GetMigrator() *Migrator {
 
 // AddMigration adds a migration to the migrator
 func (m *Migrator) AddMigration(mg *Migration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Add the migration to the hash with version as key
 	m.Migrations[mg.Version] = mg
 
@@ -74,8 +78,11 @@ func Init(db *sql.DB, dialect string) (*Migrator, error) {
 		return nil, errors.New("unsupported driver")
 	}
 
-	dbDialect = dialect
-	migrator.db = db
+	m := migrator
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.db = db
+	m.dialect = dialect
 
 	// Create `schema_migrations` table to remember which migrations were executed.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -83,13 +90,13 @@ func Init(db *sql.DB, dialect string) (*Migrator, error) {
 		batch int
 	);`); err != nil {
 		fmt.Println("Unable to create `schema_migrations` table", err)
-		return migrator, err
+		return m, err
 	}
 
 	// Find out all the executed migrations
 	rows, err := db.Query("SELECT version FROM schema_migrations;")
 	if err != nil {
-		return migrator, err
+		return m, err
 	}
 
 	defer rows.Close()
@@ -99,23 +106,30 @@ func Init(db *sql.DB, dialect string) (*Migrator, error) {
 		var version string
 		err := rows.Scan(&version)
 		if err != nil {
-			return migrator, err
+			return m, err
 		}
 
-		if migrator.Migrations[version] != nil {
-			migrator.Migrations[version].done = true
+		if m.Migrations[version] != nil {
+			m.Migrations[version].done = true
 		}
 	}
 
-	return migrator, err
+	if err := rows.Err(); err != nil {
+		return m, err
+	}
+
+	return m, nil
 }
 
 // Up method runs the migrations which have not yet been run
 func (m *Migrator) Up(step int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var bindPlaceHolders string
-	if dbDialect == DriverMySQL || dbDialect == DriverSQLite {
+	if m.dialect == DriverMySQL || m.dialect == DriverSQLite {
 		bindPlaceHolders = "?, ?"
-	} else if dbDialect == DriverPostgres {
+	} else if m.dialect == DriverPostgres {
 		bindPlaceHolders = "$1, $2"
 	} else {
 		return errors.New("unsupported driver")
@@ -129,13 +143,13 @@ func (m *Migrator) Up(step int) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
 	count := 0
 	lastBatch := 0
-	if rows, err := m.db.Query("SELECT MAX(batch) FROM schema_migrations;"); err != nil {
+	if rows, err := tx.Query("SELECT MAX(batch) FROM schema_migrations;"); err != nil {
 		return err
 	} else {
-		defer rows.Close()
 		for rows.Next() {
 			var lastBatchPtr *int // use a pointer to int to allow for NULL values
 			if err := rows.Scan(&lastBatchPtr); err != nil {
@@ -145,8 +159,16 @@ func (m *Migrator) Up(step int) error {
 				lastBatch = *lastBatchPtr // dereference the pointer to get the actual value
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
 	}
 
+	var completed []*Migration
 	for _, v := range m.Versions {
 		if step > 0 && count == step {
 			break
@@ -167,20 +189,29 @@ func (m *Migrator) Up(step int) error {
 			tx.Rollback()
 			return err
 		}
+		completed = append(completed, mg)
 		fmt.Println("Finished running migration", mg.Version)
 
 		count++
 	}
 
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for _, mg := range completed {
+		mg.done = true
+	}
 
 	return nil
 }
 
 // Down migration rolls back the last batch of migrations
 func (m *Migrator) Down(step int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var bindPlaceHolder string
-	switch dbDialect {
+	switch m.dialect {
 	case DriverMySQL, DriverSQLite:
 		bindPlaceHolder = "?"
 	case DriverPostgres:
@@ -197,19 +228,22 @@ func (m *Migrator) Down(step int) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
-	// Reverse the migration based on the batch column and the step passed
-
-	rows, err := m.db.Query(
-		fmt.Sprintf(`SELECT version FROM schema_migrations WHERE batch BETWEEN (SELECT MAX(batch - %s) FROM schema_migrations) AND (SELECT MAX(batch) FROM schema_migrations) ORDER BY version DESC;`, bindPlaceHolder),
-		step,
-	)
+	// A step is a number of batches, with zero preserving the default of the
+	// latest batch. The lower bound is inclusive, so step=1 selects one batch.
+	batchOffset := step
+	if batchOffset < 1 {
+		batchOffset = 1
+	}
+	rows, err := tx.Query(fmt.Sprintf(
+		`SELECT version FROM schema_migrations WHERE batch >= (SELECT MAX(batch) - %s + 1 FROM schema_migrations) AND batch <= (SELECT MAX(batch) FROM schema_migrations) ORDER BY batch DESC, version DESC;`,
+		bindPlaceHolder), batchOffset)
 	if err != nil {
 		return err
 	}
 
-	defer rows.Close()
-
+	var reverted []*Migration
 	var version string
 	for rows.Next() {
 		err := rows.Scan(&version)
@@ -232,16 +266,31 @@ func (m *Migrator) Down(step int) error {
 			tx.Rollback()
 			return err
 		}
+		reverted = append(reverted, mg)
 		fmt.Println("Finished reverting migration", mg.Version)
 	}
 
-	tx.Commit()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for _, mg := range reverted {
+		mg.done = false
+	}
 
 	return nil
 }
 
 // Status checks which migrations have run and which have not
 func (m *Migrator) MigrationStatus() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for _, v := range m.Versions {
 		mg := m.Migrations[v]
 
