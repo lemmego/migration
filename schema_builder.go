@@ -114,6 +114,17 @@ func (t *Table) HasConstraints() bool {
 	return len(t.constraints) > 0
 }
 
+// hasPrimaryKeyConstraint reports whether a table-level primary key was
+// declared, e.g. through t.PrimaryKey("id", "org_id").
+func (t *Table) hasPrimaryKeyConstraint() bool {
+	for _, c := range t.constraints {
+		if len(c.primaryColumns) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Increments adds an auto-incrementing column to the table
 func (t *Table) Increments(name string) *Column {
 	c := t.AddColumn(name, NewDataType(name, ColTypeIncrements, t.dialect)).Unsigned()
@@ -592,7 +603,82 @@ func (c *Column) Done() *Table {
 }
 
 // Build returns the SQL query for the schema
+// unindexableMySQLTypes cannot carry an index without a key length. MySQL
+// rejects them outright: "BLOB/TEXT column used in key specification without a
+// key length" (Error 1170). Postgres and SQLite index them happily, so this is
+// a MySQL-only restriction.
+var unindexableMySQLTypes = map[string]bool{
+	ColTypeText:       true,
+	ColTypeTinyText:   true,
+	ColTypeMediumText: true,
+	ColTypeLongText:   true,
+	ColTypeBlob:       true,
+	ColTypeTinyBlob:   true,
+	ColTypeMediumBlob: true,
+	ColTypeLongBlob:   true,
+}
+
+// Validate reports schema problems the target database would reject, so they
+// surface while building the statement rather than as a driver error part-way
+// through a migration.
+func (s *Schema) Validate() error {
+	if s.table == nil || s.dialect != DriverMySQL {
+		return nil
+	}
+
+	unindexable := map[string]bool{}
+	for _, column := range s.table.columns {
+		if column.dataType == nil || !unindexableMySQLTypes[column.dataType.genericName] {
+			continue
+		}
+		unindexable[column.name] = true
+
+		if column.unique {
+			return unindexableColumnError(s.tableName, column.name, column.dataType.genericName, "UNIQUE")
+		}
+		if column.primary {
+			return unindexableColumnError(s.tableName, column.name, column.dataType.genericName, "PRIMARY KEY")
+		}
+	}
+	if len(unindexable) == 0 {
+		return nil
+	}
+
+	// The same restriction applies to table-level keys and indexes.
+	for _, c := range s.table.constraints {
+		for _, group := range [][]string{c.primaryColumns, c.uniqueColumns} {
+			for _, name := range group {
+				if unindexable[name] {
+					return unindexableColumnError(s.tableName, name, "text or blob", "a key")
+				}
+			}
+		}
+		if c.index != nil {
+			for _, name := range c.index.columns {
+				if unindexable[name] {
+					return unindexableColumnError(s.tableName, name, "text or blob", "an index")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func unindexableColumnError(table, column, columnType, usage string) error {
+	return fmt.Errorf(
+		"migration: %s.%s is %s, which MySQL cannot use in %s without a key length; "+
+			"declare it with String(%q, 255) instead",
+		table, column, columnType, usage, column)
+}
+
 func (s *Schema) Build() string {
+	// Build has no error return and every migration calls it directly, so an
+	// invalid schema panics rather than handing the driver DDL it will refuse.
+	// Callers that want to check without panicking can use Validate.
+	if err := s.Validate(); err != nil {
+		panic(err)
+	}
+
 	switch s.operation {
 	case "create":
 		return s.buildCreate()
@@ -875,6 +961,14 @@ func (s *Schema) buildColumn(column *Column) string {
 	}
 	if column.table.dialect == DriverMySQL && column.incrementing {
 		sql += " AUTO_INCREMENT"
+		// MySQL rejects an auto-increment column that is not a key:
+		// "there can be only one auto column and it must be defined as a key".
+		// The SQLite path already promotes the incrementing column to the
+		// primary key when the caller did not; do the same here rather than
+		// emitting DDL the server will refuse.
+		if !column.primary && !column.table.hasPrimaryKeyConstraint() {
+			sql += " PRIMARY KEY"
+		}
 	}
 
 	// This column level foreign key is not being executed at all.

@@ -1019,3 +1019,160 @@ func normalizeSchema(schema string) string {
 	schema = strings.ReplaceAll(schema, " ", "")
 	return schema
 }
+
+// MySQL refuses "AUTO_INCREMENT" on a column that is not a key:
+// Error 1075, "there can be only one auto column and it must be defined as a
+// key". Every other Increments test marks the column .Primary() explicitly, so
+// the unmarked form — which is the natural thing to write, since it implies a
+// primary key elsewhere — went uncovered.
+func TestMySQLIncrementsWithoutExplicitPrimary(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+	expected := "CREATE TABLE users (\nid INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY);"
+
+	schema := Create("users", func(t *Table) {
+		t.Increments("id")
+	}).Build()
+
+	if normalizeSchema(schema) != normalizeSchema(expected) {
+		t.Errorf("\nExpected: \n%s, \nGot: \n%s", expected, schema)
+	}
+}
+
+func TestMySQLBigIncrementsWithoutExplicitPrimary(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+	expected := "CREATE TABLE users (\nid BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY);"
+
+	schema := Create("users", func(t *Table) {
+		t.BigIncrements("id")
+	}).Build()
+
+	if normalizeSchema(schema) != normalizeSchema(expected) {
+		t.Errorf("\nExpected: \n%s, \nGot: \n%s", expected, schema)
+	}
+}
+
+// An explicitly marked column must not gain a second PRIMARY KEY.
+func TestMySQLIncrementsPrimaryIsNotDuplicated(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+
+	schema := Create("users", func(t *Table) {
+		t.Increments("id").Primary()
+	}).Build()
+
+	if count := strings.Count(schema, "PRIMARY KEY"); count != 1 {
+		t.Errorf("expected exactly one PRIMARY KEY, got %d:\n%s", count, schema)
+	}
+}
+
+// When the table declares its own primary key, the inline one must be left off
+// so the two do not collide.
+func TestMySQLIncrementsDefersToTablePrimaryKey(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+
+	schema := Create("memberships", func(t *Table) {
+		t.Increments("id")
+		t.Int("org_id")
+		t.PrimaryKey("id", "org_id")
+	}).Build()
+
+	if strings.Contains(schema, "AUTO_INCREMENT PRIMARY KEY") {
+		t.Errorf("an inline PRIMARY KEY must not be added when the table declares one:\n%s", schema)
+	}
+	if !strings.Contains(schema, "PRIMARY KEY (id, org_id)") {
+		t.Errorf("expected the declared composite primary key:\n%s", schema)
+	}
+}
+
+// Postgres uses SERIAL, which carries no such requirement, and must be
+// unaffected by the MySQL fix.
+func TestPostgresIncrementsWithoutExplicitPrimaryIsUnchanged(t *testing.T) {
+	os.Setenv("DB_DRIVER", "postgres")
+
+	schema := Create("users", func(t *Table) {
+		t.Increments("id")
+	}).Build()
+
+	if strings.Contains(schema, "PRIMARY KEY") {
+		t.Errorf("postgres must not gain an inline PRIMARY KEY:\n%s", schema)
+	}
+}
+
+// MySQL refuses an index on a TEXT or BLOB column without a key length
+// (Error 1170). Catching it while the statement is built turns a confusing
+// mid-migration driver error into a message naming the column and the fix.
+func TestMySQLRejectsIndexedTextColumns(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+
+	cases := map[string]func(t *Table){
+		"column unique":  func(t *Table) { t.Text("email").Unique() },
+		"column primary": func(t *Table) { t.Text("email").Primary() },
+		"table unique":   func(t *Table) { t.Text("email"); t.UniqueKey("email") },
+		"table primary":  func(t *Table) { t.Text("email"); t.PrimaryKey("email") },
+		"table index":    func(t *Table) { t.Text("email"); t.Index("email") },
+		// Types without a dedicated builder are reachable through AddColumn.
+		"blob unique": func(t *Table) {
+			t.AddColumn("payload", NewDataType("payload", ColTypeBlob, DriverMySQL)).Unique()
+		},
+		"long text": func(t *Table) {
+			t.AddColumn("body", NewDataType("body", ColTypeLongText, DriverMySQL)).Unique()
+		},
+	}
+
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			schema := Create("users", build)
+
+			err := schema.Validate()
+			if err == nil {
+				t.Fatalf("expected %s to be rejected", name)
+			}
+			if !strings.Contains(err.Error(), "String(") {
+				t.Fatalf("the error should name the fix: %v", err)
+			}
+
+			// Build panics rather than emitting DDL the server will refuse.
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Fatal("expected Build to panic on an invalid schema")
+					}
+				}()
+				_ = schema.Build()
+			}()
+		})
+	}
+}
+
+// A bounded column is indexable, and an unindexed text column is fine.
+func TestMySQLAcceptsIndexableColumns(t *testing.T) {
+	os.Setenv("DB_DRIVER", "mysql")
+
+	schema := Create("users", func(t *Table) {
+		t.BigIncrements("id").Primary()
+		t.String("email", 255).Unique()
+		t.Text("bio") // not indexed, so perfectly fine
+	})
+	if err := schema.Validate(); err != nil {
+		t.Fatalf("a bounded unique column must be accepted: %v", err)
+	}
+	if built := schema.Build(); !strings.Contains(built, "VARCHAR(255)") {
+		t.Fatalf("unexpected DDL: %s", built)
+	}
+}
+
+// Postgres and SQLite index text columns without complaint, so the check must
+// not fire for them.
+func TestOnlyMySQLRejectsIndexedText(t *testing.T) {
+	for _, driver := range []string{"postgres", "sqlite"} {
+		t.Run(driver, func(t *testing.T) {
+			os.Setenv("DB_DRIVER", driver)
+			schema := Create("users", func(t *Table) { t.Text("email").Unique() })
+			if err := schema.Validate(); err != nil {
+				t.Fatalf("%s indexes text fine; it must not be rejected: %v", driver, err)
+			}
+			if built := schema.Build(); built == "" {
+				t.Fatal("expected DDL to be produced")
+			}
+		})
+	}
+}
