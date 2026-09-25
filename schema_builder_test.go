@@ -630,7 +630,8 @@ func TestPostgresUnique(t *testing.T) {
 
 func TestSQLiteIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nINDEX users_email_index (email));"
+	// SQLite has no inline INDEX clause; the index is its own statement.
+	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL);\nCREATE INDEX users_email_index ON users (email);"
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)
@@ -648,7 +649,8 @@ func TestSQLiteIndex(t *testing.T) {
 
 func TestMySQLIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
-	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nINDEX users_email_index (email));"
+	// MySQL does accept an inline INDEX clause, so it keeps one statement.
+	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL, INDEX users_email_index (email));"
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)
@@ -666,7 +668,8 @@ func TestMySQLIndex(t *testing.T) {
 
 func TestPostgresIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
-	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nINDEX users_email_index (email));"
+	// SQLite has no inline INDEX clause; the index is its own statement.
+	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL);\nCREATE INDEX users_email_index ON users (email);"
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)

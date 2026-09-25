@@ -679,6 +679,39 @@ func (s *Schema) Build() string {
 		panic(err)
 	}
 
+	statement := s.buildOperation()
+	if trailing := s.trailingIndexStatements(); trailing != "" {
+		statement += "\n" + trailing
+	}
+	return statement
+}
+
+// trailingIndexStatements renders the indexes that cannot be declared inside
+// CREATE TABLE. Only MySQL accepts an inline INDEX clause; everywhere else an
+// index is its own statement.
+// closeDefinition trims the separator left dangling when the constraint list
+// contributes nothing.
+func closeDefinition(sql string) string {
+	return strings.TrimRight(sql, ", \n\t")
+}
+
+func (s *Schema) trailingIndexStatements() string {
+	if s.table == nil || s.dialect == DriverMySQL || s.operation == "drop" {
+		return ""
+	}
+
+	var statements strings.Builder
+	for _, constraint := range s.table.constraints {
+		if constraint.index == nil || constraint.operation == "drop" {
+			continue
+		}
+		statements.WriteString("CREATE INDEX " + constraint.index.name +
+			" ON " + s.tableName + " (" + s.buildColumns(constraint.index.columns) + ");\n")
+	}
+	return strings.TrimRight(statements.String(), "\n")
+}
+
+func (s *Schema) buildOperation() string {
 	switch s.operation {
 	case "create":
 		return s.buildCreate()
@@ -780,6 +813,7 @@ func (s *Schema) buildCreateSQLite() string {
 	}
 
 	sql += s.buildConstraints()
+	sql = closeDefinition(sql)
 	sql += "\n);"
 	return sql
 }
@@ -832,6 +866,7 @@ func (s *Schema) buildCreateMySQL() string {
 		}
 	}
 	sql += s.buildConstraints()
+	sql = closeDefinition(sql)
 	sql += ");"
 	return sql
 }
@@ -846,6 +881,7 @@ func (s *Schema) buildCreatePostgreSQL() string {
 		}
 	}
 	sql += s.buildConstraints()
+	sql = closeDefinition(sql)
 	sql += ");"
 	return sql
 }
@@ -1004,7 +1040,9 @@ func (s *Schema) buildConstraints() string {
 				}
 				sql += prefix + "(" + s.buildColumns(constraint.uniqueColumns) + "), "
 			}
-			if constraint.index != nil {
+			if constraint.index != nil && s.dialect == DriverMySQL {
+				// Inline INDEX is a MySQL extension. The other dialects get a
+				// separate CREATE INDEX appended after the table instead.
 				sql += "INDEX " + constraint.index.name + " (" + s.buildColumns(constraint.index.columns) + "), "
 			}
 			if constraint.foreignKey != nil {
