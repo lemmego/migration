@@ -213,3 +213,11 @@ func (dataType *DataType) AppendSufix(suffix string) *DataType {
 	dataType.suffix = dataType.suffix + " " + suffix
 	return dataType
 }
+
+// Precision returns the column's declared precision, or zero when it has none.
+func (dataType *DataType) Precision() uint {
+	if dataType == nil {
+		return 0
+	}
+	return dataType.precision
+}

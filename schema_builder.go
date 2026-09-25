@@ -40,6 +40,7 @@ type Column struct {
 	dataType     *DataType
 	nullable     bool
 	defaultValue any
+	hasDefault   bool
 	unique       bool
 	primary      bool
 	incrementing bool
@@ -574,9 +575,26 @@ func (c *Column) NotNull() *Column {
 	return c
 }
 
-// Default adds the default value to the column
+// Default sets the column's default value.
+//
+// The value is rendered as a SQL literal according to its Go type, so pass the
+// value you actually want: Default("active") produces DEFAULT \'active\' and
+// Default(18) produces DEFAULT 18. Strings are quoted and their quotes
+// escaped, booleans and time.Time are rendered the way the target dialect
+// expects, and a nil value produces DEFAULT NULL.
+//
+// To emit a SQL expression rather than a literal — CURRENT_TIMESTAMP, a
+// function call, an arithmetic expression — wrap it in [Expr], which is passed
+// through verbatim:
+//
+//	t.String("status", 255).Default("active")
+//	t.DateTime("created_at", 6).Default(Expr("CURRENT_TIMESTAMP"))
+//
+// A value of a type with no SQL literal form is reported by [Schema.Validate],
+// so it surfaces while the statement is built rather than as a driver error.
 func (c *Column) Default(defaultValue any) *Column {
 	c.defaultValue = defaultValue
+	c.hasDefault = true
 	return c
 }
 
@@ -622,7 +640,23 @@ var unindexableMySQLTypes = map[string]bool{
 // surface while building the statement rather than as a driver error part-way
 // through a migration.
 func (s *Schema) Validate() error {
-	if s.table == nil || s.dialect != DriverMySQL {
+	if s.table == nil {
+		return nil
+	}
+
+	// A default with no SQL literal form is dropped by buildColumn, which
+	// would silently produce a table without the default the migration asked
+	// for. Report it instead, on every dialect.
+	for _, column := range s.table.columns {
+		if !column.hasDefault {
+			continue
+		}
+		if _, err := defaultLiteral(s.table.dialect, column.defaultValue); err != nil {
+			return fmt.Errorf("migration: %s.%s: %w", s.tableName, column.name, err)
+		}
+	}
+
+	if s.dialect != DriverMySQL {
 		return nil
 	}
 
@@ -983,8 +1017,14 @@ func (s *Schema) buildColumn(column *Column) string {
 	if !column.nullable {
 		sql += " NOT NULL"
 	}
-	if column.defaultValue != nil {
-		sql += " DEFAULT " + fmt.Sprintf("%v", column.defaultValue)
+	if column.hasDefault {
+		// An unrenderable default is rejected by Validate, which Build runs
+		// before reaching here; the error is ignored rather than duplicated.
+		if literal, err := defaultLiteralWithPrecision(
+			column.table.dialect, column.defaultValue, column.dataType.Precision(),
+		); err == nil {
+			sql += " DEFAULT " + literal
+		}
 	}
 	if column.unique {
 		sql += " UNIQUE"
