@@ -51,6 +51,17 @@ func GetMigrator() *Migrator {
 }
 
 // AddMigration adds a migration to the migrator
+// Dialect reports the database the migrator was initialised for.
+//
+// A migration that writes its own DDL needs this: the schema builder reads
+// DB_DRIVER, but a package shipping a migration renders through
+// SchemaStatements or CreateFor and has to be told. Empty before Init runs.
+func (m *Migrator) Dialect() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.dialect
+}
+
 func (m *Migrator) AddMigration(mg *Migration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

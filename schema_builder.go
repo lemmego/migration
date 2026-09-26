@@ -79,6 +79,17 @@ func NewSchema() *Schema {
 	return &Schema{dialect: determineDialect()}
 }
 
+// NewSchemaFor creates a schema for an explicitly named dialect.
+//
+// The DB_DRIVER default suits a migration run, where the environment already
+// says which database is being migrated. It does not suit a caller that knows
+// its target — a framework package emitting DDL for a connection it holds, or
+// a test covering all three dialects in one process — because an environment
+// variable is global and a test cannot vary it safely in parallel.
+func NewSchemaFor(dialect string) *Schema {
+	return &Schema{dialect: dialect}
+}
+
 // Create provides callback to create a new table, and returns a schema
 func Create(tableName string, tableFunc func(t *Table)) *Schema {
 	s := NewSchema()
@@ -87,6 +98,26 @@ func Create(tableName string, tableFunc func(t *Table)) *Schema {
 	t := &Table{name: tableName, dialect: s.dialect}
 	s.table = t
 	tableFunc(t)
+	return s
+}
+
+// CreateFor is Create for an explicitly named dialect, for a caller that
+// knows its target rather than relying on DB_DRIVER.
+func CreateFor(dialect, tableName string, tableFunc func(t *Table)) *Schema {
+	s := NewSchemaFor(dialect)
+	s.tableName = tableName
+	s.operation = "create"
+	t := &Table{name: tableName, dialect: s.dialect}
+	s.table = t
+	tableFunc(t)
+	return s
+}
+
+// DropFor is Drop for an explicitly named dialect.
+func DropFor(dialect, tableName string) *Schema {
+	s := NewSchemaFor(dialect)
+	s.tableName = tableName
+	s.operation = "drop"
 	return s
 }
 
@@ -713,11 +744,27 @@ func (s *Schema) Build() string {
 		panic(err)
 	}
 
-	statement := s.buildOperation()
-	if trailing := s.trailingIndexStatements(); trailing != "" {
-		statement += "\n" + trailing
+	return strings.Join(s.Statements(), "\n")
+}
+
+// Statements returns the DDL as individual statements.
+//
+// Build joins them with a newline, which works for a migration running
+// through a driver that accepts several statements at once. MySQL's does not
+// unless the DSN opts in with multiStatements, so a caller executing DDL
+// itself needs them separately — and splitting Build's output on semicolons
+// afterwards is guesswork the builder does not have to make anyone do.
+func (s *Schema) Statements() []string {
+	if err := s.Validate(); err != nil {
+		panic(err)
 	}
-	return statement
+
+	statements := []string{}
+	if operation := s.buildOperation(); operation != "" {
+		statements = append(statements, operation)
+	}
+	statements = append(statements, s.trailingIndexes()...)
+	return statements
 }
 
 // trailingIndexStatements renders the indexes that cannot be declared inside
@@ -730,19 +777,23 @@ func closeDefinition(sql string) string {
 }
 
 func (s *Schema) trailingIndexStatements() string {
+	return strings.Join(s.trailingIndexes(), "\n")
+}
+
+func (s *Schema) trailingIndexes() []string {
 	if s.table == nil || s.dialect == DriverMySQL || s.operation == "drop" {
-		return ""
+		return nil
 	}
 
-	var statements strings.Builder
+	var statements []string
 	for _, constraint := range s.table.constraints {
 		if constraint.index == nil || constraint.operation == "drop" {
 			continue
 		}
-		statements.WriteString("CREATE INDEX " + constraint.index.name +
-			" ON " + s.tableName + " (" + s.buildColumns(constraint.index.columns) + ");\n")
+		statements = append(statements, "CREATE INDEX "+constraint.index.name+
+			" ON "+s.tableName+" ("+s.buildColumns(constraint.index.columns)+");")
 	}
-	return strings.TrimRight(statements.String(), "\n")
+	return statements
 }
 
 func (s *Schema) buildOperation() string {
