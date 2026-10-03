@@ -254,16 +254,34 @@ func (m *Migrator) Down(step int) error {
 		return err
 	}
 
-	var reverted []*Migration
-	var version string
+	// Drain the cursor completely before running anything else on this
+	// transaction.
+	//
+	// A *sql.Tx holds one connection, and a statement issued while a Rows
+	// from the same Tx is still open desynchronises the wire protocol. With
+	// lib/pq that surfaces as "unexpected Parse response 'C'" on the first
+	// statement the reverted migration runs, so `migrate down` failed on
+	// Postgres every time while passing on MySQL and SQLite, whose drivers
+	// buffer the result set and hide the overlap.
+	var versions []string
 	for rows.Next() {
-		err := rows.Scan(&version)
-		if err != nil {
+		var version string
+		if err := rows.Scan(&version); err != nil {
 			return err
 		}
+		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 
+	var reverted []*Migration
+	for _, version := range versions {
 		mg := m.Migrations[version]
-		if !mg.done {
+		if mg == nil || !mg.done {
 			return errors.New("migration not found")
 		}
 
@@ -281,12 +299,6 @@ func (m *Migrator) Down(step int) error {
 		fmt.Println("Finished reverting migration", mg.Version)
 	}
 
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
