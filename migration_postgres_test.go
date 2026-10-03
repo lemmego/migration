@@ -26,18 +26,30 @@ func postgresDB(t *testing.T) *sql.DB {
 	if err := db.Ping(); err != nil {
 		t.Fatalf("pinging %s: %v", dsn, err)
 	}
+	// These tests share one database, so each run starts from nothing and
+	// leaves nothing behind. Dropping every probe table rather than the one
+	// the calling test knows about keeps a half-finished earlier run from
+	// failing a later one with "relation already exists", which says nothing
+	// about the code under test.
+	reset := func() {
+		for _, stmt := range []string{
+			`DROP TABLE IF EXISTS migration_down_probe`,
+			`DROP TABLE IF EXISTS tenant_probe`,
+			`DROP TABLE IF EXISTS probe_20260101000001`,
+			`DROP TABLE IF EXISTS probe_20260101000002`,
+			`DROP TABLE IF EXISTS probe_20260101000003`,
+			`DROP TABLE IF EXISTS schema_migrations`,
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("resetting the test database: %v", err)
+			}
+		}
+	}
+	reset()
 	t.Cleanup(func() {
-		_, _ = db.Exec(`DROP TABLE IF EXISTS migration_down_probe`)
-		_, _ = db.Exec(`DROP TABLE IF EXISTS schema_migrations`)
+		reset()
 		db.Close()
 	})
-	// Start from nothing, so a previous run cannot mask a failure.
-	if _, err := db.Exec(`DROP TABLE IF EXISTS migration_down_probe`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`DROP TABLE IF EXISTS schema_migrations`); err != nil {
-		t.Fatal(err)
-	}
 	return db
 }
 
