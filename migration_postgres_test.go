@@ -3,6 +3,7 @@ package migration
 import (
 	"database/sql"
 	"os"
+	"strings"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -147,4 +148,100 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 		t.Fatal(err)
 	}
 	return n > 0
+}
+
+// The migrator is a package-level singleton and done only ever moved from
+// false to true, so a process that initialised against a second database
+// carried the first one's state across and skipped every migration — leaving
+// an empty schema and reporting success. That is exactly what a test harness
+// with a scratch database per case does, and what a program migrating one
+// tenant after another does.
+func TestInitTakesDoneStateFromTheDatabase(t *testing.T) {
+	first := postgresDB(t)
+
+	oldMigrator := migrator
+	defer func() { migrator = oldMigrator }()
+	migrator = &Migrator{Versions: []string{}, Migrations: map[string]*Migration{}}
+
+	migrator.AddMigration(&Migration{
+		Version: "20260301000000",
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE tenant_probe (id INT)`)
+			return err
+		},
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`DROP TABLE tenant_probe`)
+			return err
+		},
+	})
+
+	m1, err := Init(first, DriverPostgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m1.Up(-1); err != nil {
+		t.Fatal(err)
+	}
+	if !tableExists(t, first, "tenant_probe") {
+		t.Fatal("the first database was not migrated")
+	}
+
+	// A second, independent database. Same process, same migrator.
+	second := secondPostgresDB(t)
+
+	m2, err := Init(second, DriverPostgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m2.Up(-1); err != nil {
+		t.Fatal(err)
+	}
+	if !tableExists(t, second, "tenant_probe") {
+		t.Error("the second database was not migrated: Init carried done state over from the first")
+	}
+}
+
+// secondPostgresDB opens a scratch database beside the one in the DSN, so the
+// test has two genuinely separate schemas in one process.
+func secondPostgresDB(t *testing.T) *sql.DB {
+	t.Helper()
+	admin, err := sql.Open(DriverPostgres, os.Getenv("MIGRATION_POSTGRES_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+
+	name := "migration_second_probe"
+	if _, err := admin.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(`CREATE DATABASE ` + name); err != nil {
+		t.Fatal(err)
+	}
+
+	fields := map[string]string{}
+	for _, field := range strings.Fields(os.Getenv("MIGRATION_POSTGRES_DSN")) {
+		if k, v, ok := strings.Cut(field, "="); ok {
+			fields[k] = v
+		}
+	}
+	fields["dbname"] = name
+	var pairs []string
+	for k, v := range fields {
+		pairs = append(pairs, k+"="+v)
+	}
+
+	db, err := sql.Open(DriverPostgres, strings.Join(pairs, " "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+		cleanup, err := sql.Open(DriverPostgres, os.Getenv("MIGRATION_POSTGRES_DSN"))
+		if err == nil {
+			_, _ = cleanup.Exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`)
+			cleanup.Close()
+		}
+	})
+	return db
 }

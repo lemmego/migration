@@ -104,6 +104,19 @@ func Init(db *sql.DB, dialect string) (*Migrator, error) {
 		return m, err
 	}
 
+	// The database is the authority on what has run, so start from "nothing
+	// has" and let it say otherwise.
+	//
+	// Without the reset, done only ever moved from false to true, and the
+	// migrator is a package-level singleton. So a process that initialised
+	// against a second database — a test harness with a scratch database per
+	// case, or a program migrating one tenant after another — carried the
+	// first database's done flags into the second and silently skipped every
+	// migration, leaving an empty schema and no error.
+	for _, mg := range m.Migrations {
+		mg.done = false
+	}
+
 	// Find out all the executed migrations
 	rows, err := db.Query("SELECT version FROM schema_migrations;")
 	if err != nil {
