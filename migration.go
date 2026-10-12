@@ -229,7 +229,10 @@ func (m *Migrator) Up(step int) error {
 	return nil
 }
 
-// Down migration rolls back the last batch of migrations
+// Down reverts migrations, most recently applied first.
+//
+// step is a number of migrations, as it is for Up. Zero reverts the whole of
+// the latest batch, which is what a bare `migrate down` means.
 func (m *Migrator) Down(step int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -254,15 +257,32 @@ func (m *Migrator) Down(step int) error {
 	}
 	defer tx.Rollback()
 
-	// A step is a number of batches, with zero preserving the default of the
-	// latest batch. The lower bound is inclusive, so step=1 selects one batch.
-	batchOffset := step
-	if batchOffset < 1 {
-		batchOffset = 1
+	// A step is a number of *migrations*, counted back from the most recently
+	// applied, and zero means the whole of the latest batch.
+	//
+	// It used to be a number of batches, which is the same thing only when
+	// every batch holds one migration — and the flag that reaches this says
+	// "Number of migrations to execute", as does Up, which has always counted
+	// migrations. The gap between the two was quiet and expensive: on any
+	// project whose migrations were applied in a single `migrate up`, and
+	// that is every project on its first deploy, the latest batch is the
+	// entire schema. `migrate down --step 1`, asking to undo one migration,
+	// dropped all of it. Fourteen tables, from a flag that promised one.
+	//
+	// The test that was supposed to cover this applied its two migrations in
+	// two separate Up calls, so one batch held one migration and both
+	// readings agreed. A single-batch case is the one that tells them apart.
+	var rows *sql.Rows
+	if step > 0 {
+		rows, err = tx.Query(fmt.Sprintf(
+			`SELECT version FROM schema_migrations ORDER BY batch DESC, version DESC LIMIT %s;`,
+			bindPlaceHolder), step)
+	} else {
+		// No step: the latest batch, which is what a bare `migrate down`
+		// has always meant and the convention everywhere else.
+		rows, err = tx.Query(
+			`SELECT version FROM schema_migrations WHERE batch = (SELECT MAX(batch) FROM schema_migrations) ORDER BY version DESC;`)
 	}
-	rows, err := tx.Query(fmt.Sprintf(
-		`SELECT version FROM schema_migrations WHERE batch >= (SELECT MAX(batch) - %s + 1 FROM schema_migrations) AND batch <= (SELECT MAX(batch) FROM schema_migrations) ORDER BY batch DESC, version DESC;`,
-		bindPlaceHolder), batchOffset)
 	if err != nil {
 		return err
 	}

@@ -150,6 +150,62 @@ func TestDownRevertsSeveralMigrationsOnPostgres(t *testing.T) {
 	}
 }
 
+// A stepped Down on Postgres, which is the only place the step's SQL actually
+// runs: it is a `LIMIT $1`, and postgresDialect numbers placeholders $N while
+// SQLite and MySQL take `?`. Both existing tests here call Down(-1), so the
+// stepped query had never been executed against a real Postgres driver — the
+// branch could have been malformed and every SQLite test would still pass.
+//
+// It also covers the behaviour the step change was about: three migrations in
+// one batch, and Down(1) takes one of them.
+func TestDownStepOnPostgresTakesOneMigrationFromOneBatch(t *testing.T) {
+	db := postgresDB(t)
+
+	oldMigrator := migrator
+	defer func() { migrator = oldMigrator }()
+	migrator = &Migrator{Versions: []string{}, Migrations: map[string]*Migration{}}
+
+	versions := []string{"20260101000001", "20260101000002", "20260101000003"}
+	for _, v := range versions {
+		version := v
+		migrator.AddMigration(&Migration{
+			Version: version,
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec(`CREATE TABLE probe_` + version + ` (id INT)`)
+				return err
+			},
+			Down: func(tx *sql.Tx) error {
+				_, err := tx.Exec(`DROP TABLE probe_` + version)
+				return err
+			},
+		})
+		t.Cleanup(func() { _, _ = db.Exec(`DROP TABLE IF EXISTS probe_` + version) })
+	}
+
+	m, err := Init(db, DriverPostgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One batch, three migrations.
+	if err := m.Up(-1); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	if err := m.Down(1); err != nil {
+		t.Fatalf("Down(1): %v", err)
+	}
+
+	// The newest is gone and the other two are untouched.
+	if tableExists(t, db, "probe_20260101000003") {
+		t.Error("Down(1) did not revert the most recent migration")
+	}
+	for _, v := range []string{"20260101000001", "20260101000002"} {
+		if !tableExists(t, db, "probe_"+v) {
+			t.Errorf("Down(1) also reverted probe_%s; a step is a migration, not a batch", v)
+		}
+	}
+}
+
 func tableExists(t *testing.T, db *sql.DB, name string) bool {
 	t.Helper()
 	var n int

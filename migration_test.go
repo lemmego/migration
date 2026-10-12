@@ -169,3 +169,107 @@ func TestDownRollsBackMigrationErrorAndDoneState(t *testing.T) {
 		t.Fatalf("migration changes were not rolled back: %v", err)
 	}
 }
+
+// TestDownStepCountsMigrationsNotBatches is the case the old test could not
+// see, and the reason it could not: it applied its two migrations in two Up
+// calls, so each batch held exactly one migration and "one batch" and "one
+// migration" were the same number.
+//
+// Applied together, they are not. Down(1) used to take the latest *batch* —
+// both of them — while the flag that reaches it says "Number of migrations".
+// On a project whose schema went up in one `migrate up`, which is every
+// project on its first deploy, asking to undo one migration dropped
+// everything.
+func TestDownStepCountsMigrationsNotBatches(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+
+	for _, version := range []string{"001", "002", "003"} {
+		m.AddMigration(&Migration{
+			Version: version,
+			Up:      func(*sql.Tx) error { return nil },
+			Down:    func(*sql.Tx) error { return nil },
+		})
+	}
+	if _, err := Init(db, DriverSQLite); err != nil {
+		t.Fatal(err)
+	}
+
+	// One batch, three migrations.
+	if err := m.Up(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMigrations(t, db); got != 3 {
+		t.Fatalf("applied = %d, want 3", got)
+	}
+	if got := countBatches(t, db); got != 1 {
+		t.Fatalf("batches = %d, want 1 — the premise of this test", got)
+	}
+
+	if err := m.Down(1); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMigrations(t, db); got != 2 {
+		t.Fatalf("after Down(1), applied = %d, want 2; a step is a migration, not a batch", got)
+	}
+
+	// And a step larger than one still stops where it was told to.
+	if err := m.Down(1); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMigrations(t, db); got != 1 {
+		t.Fatalf("after a second Down(1), applied = %d, want 1", got)
+	}
+}
+
+// A bare Down takes the whole latest batch, which is the long-standing
+// default and the one behaviour this change had to leave alone.
+func TestDownWithNoStepTakesTheLatestBatch(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+
+	for _, version := range []string{"001", "002", "003"} {
+		m.AddMigration(&Migration{
+			Version: version,
+			Up:      func(*sql.Tx) error { return nil },
+			Down:    func(*sql.Tx) error { return nil },
+		})
+	}
+	if _, err := Init(db, DriverSQLite); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two batches: one migration, then two.
+	if err := m.Up(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Up(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := countBatches(t, db); got != 2 {
+		t.Fatalf("batches = %d, want 2", got)
+	}
+
+	if err := m.Down(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMigrations(t, db); got != 1 {
+		t.Fatalf("after a bare Down, applied = %d, want 1 — the second batch held two", got)
+	}
+}
+
+func countMigrations(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func countBatches(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(DISTINCT batch) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
