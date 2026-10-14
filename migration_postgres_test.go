@@ -2,6 +2,7 @@ package migration
 
 import (
 	"database/sql"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -287,19 +288,7 @@ func secondPostgresDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 
-	fields := map[string]string{}
-	for _, field := range strings.Fields(os.Getenv("MIGRATION_POSTGRES_DSN")) {
-		if k, v, ok := strings.Cut(field, "="); ok {
-			fields[k] = v
-		}
-	}
-	fields["dbname"] = name
-	var pairs []string
-	for k, v := range fields {
-		pairs = append(pairs, k+"="+v)
-	}
-
-	db, err := sql.Open(DriverPostgres, strings.Join(pairs, " "))
+	db, err := sql.Open(DriverPostgres, dsnNaming(os.Getenv("MIGRATION_POSTGRES_DSN"), name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,4 +301,36 @@ func secondPostgresDB(t *testing.T) *sql.DB {
 		}
 	})
 	return db
+}
+
+// dsnNaming returns dsn pointed at a different database.
+//
+// lib/pq accepts two DSN shapes and this only understood one. The keyword
+// rewrite it used to do — split on whitespace, cut on "=", put the pairs back
+// together — turns a URL into nonsense rather than refusing it: "sslmode"
+// becomes part of a key and the setting is lost, so the second connection
+// went out with lib/pq's own default of require and the test failed with
+// "pq: SSL is not enabled on the server". That names the symptom and hides
+// the cause, which is a confusing thing to be told when the DSN you supplied
+// was fine.
+func dsnNaming(dsn, database string) string {
+	if parsed, err := url.Parse(dsn); err == nil &&
+		(parsed.Scheme == "postgres" || parsed.Scheme == "postgresql") {
+		parsed.Path = "/" + database
+		return parsed.String()
+	}
+
+	fields := map[string]string{}
+	for _, field := range strings.Fields(dsn) {
+		if key, value, ok := strings.Cut(field, "="); ok {
+			fields[key] = value
+		}
+	}
+	fields["dbname"] = database
+
+	pairs := make([]string, 0, len(fields))
+	for key, value := range fields {
+		pairs = append(pairs, key+"="+value)
+	}
+	return strings.Join(pairs, " ")
 }

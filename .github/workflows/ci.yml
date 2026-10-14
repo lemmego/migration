@@ -1,0 +1,72 @@
+# This workflow runs in THIS module's own repository, where the repository
+# root is the module root.
+#
+# That is why there are no `paths:` filters and no `cd` into a subdirectory.
+# The three workflows that used to exist in this monorepo were written as
+# though it were a single repository, filtering on paths like "api/**" and
+# "go.work" which do not exist in a per-module checkout. They therefore never
+# triggered — `gh run list` reported zero runs for queue and tasker ever, and
+# nothing but GitHub's own Dependency Graph for api — and every step would
+# have failed if they had, since `cd api`, `go build ./api/...` and
+# `go work sync` all name things that are not there.
+#
+# There is also no GOWORK=off step. That distinction matters in the monorepo
+# working tree, where a workspace can mask a missing requirement; here there
+# is no go.work at all, so the ordinary run already is the standalone one.
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lemmego_migration_test
+        ports: ['5432:5432']
+        # Without a health check the first step can connect before Postgres
+        # accepts connections, which surfaces as a test failure rather than as
+        # the startup race it is.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # go-version-file rather than a literal: the module declares the version
+      # it needs. The old workflow ran a matrix of 1.25 and 1.26 against
+      # modules that declare go 1.27, so it was testing something nobody runs.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+        env:
+          MIGRATION_POSTGRES_DSN: "postgres://postgres:postgres@127.0.0.1:5432/lemmego_migration_test?sslmode=disable"
