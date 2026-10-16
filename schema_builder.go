@@ -16,6 +16,13 @@ type constraint struct {
 	uniqueColumns  []string
 	foreignKey     *foreignKey
 	index          *index
+	check          *check
+}
+
+// check is a CHECK constraint: a named boolean expression over the row.
+type check struct {
+	name       string
+	expression string
 }
 
 type index struct {
@@ -438,15 +445,12 @@ func (t *Table) DropPrimaryKey() {
 
 // Index adds an index to the table
 func (t *Table) Index(columns ...string) {
-	indexName := ""
-	if len(columns) == 1 {
-		indexName = t.name + "_" + columns[0] + "_index"
-	} else {
-		for _, column := range columns {
-			indexName += column + "_"
-		}
-		indexName += "index"
-	}
+	// Always prefixed with the table. An index name is schema-global in
+	// Postgres, so the multi-column form — which used to be built from the
+	// columns alone — meant two tables wanting an index on (user_id,
+	// position) collided on `user_id_position_index`. The whole migration
+	// batch runs in one transaction, so the second one took the batch down.
+	indexName := t.name + "_" + strings.Join(columns, "_") + "_index"
 	c := &constraint{
 		name:      indexName,
 		operation: "add",
@@ -469,15 +473,12 @@ func (t *Table) DropIndex(indexName string) {
 
 // UniqueKey adds a unique constraint to the table
 func (t *Table) UniqueKey(columns ...string) {
-	constraintName := t.name + "_"
-	if len(columns) == 1 {
-		constraintName = columns[0] + "_unique"
-	} else {
-		for _, column := range columns {
-			constraintName += column + "_"
-		}
-		constraintName += "unique"
-	}
+	// The same rule as Index, and the bug here was the mirror image: the
+	// single-column branch overwrote the prefix it had just built, so
+	// `email_unique` belonged to whichever table migrated first. A unique
+	// constraint is backed by an index in Postgres, so the name is
+	// schema-global just the same.
+	constraintName := t.name + "_" + strings.Join(columns, "_") + "_unique"
 	c := &constraint{
 		name:          constraintName,
 		operation:     "add",
@@ -491,6 +492,44 @@ func (t *Table) DropUniqueKey(name string) {
 	c := &constraint{
 		name:      name,
 		operation: "drop",
+	}
+	t.constraints = append(t.constraints, c)
+}
+
+// Check adds a named CHECK constraint to the table.
+//
+// The expression is written in SQL and passed through untouched, because a
+// check is the one constraint whose whole content is an expression: a regex on
+// a handle, a range on a count, a set of permitted states, a relationship
+// between two columns. Anything that tried to model it would cover a fraction
+// of what people write and send the rest back to raw SQL.
+//
+// The name is required rather than derived. It is what a later migration
+// drops, what Postgres puts in the error when a row is refused, and the thing
+// a reader greps for — none of which survives a generated name nobody chose.
+//
+// Supported everywhere this package targets: Postgres, MySQL 8.0.16 and
+// later, and SQLite. Note that MySQL before 8.0.16 parses a CHECK and ignores
+// it, which is its own problem and not one this package can detect from here.
+func (t *Table) Check(name string, expression string) {
+	c := &constraint{
+		name:      name,
+		operation: "add",
+		check:     &check{name: name, expression: expression},
+	}
+	t.constraints = append(t.constraints, c)
+}
+
+// DropCheck removes a CHECK constraint by name.
+//
+// SQLite cannot: it has no ALTER TABLE DROP CONSTRAINT, and removing one means
+// rebuilding the table. That is a migration an application writes for itself,
+// so this refuses rather than emitting something SQLite will reject.
+func (t *Table) DropCheck(name string) {
+	c := &constraint{
+		name:      name,
+		operation: "drop",
+		check:     &check{name: name},
 	}
 	t.constraints = append(t.constraints, c)
 }
@@ -859,10 +898,8 @@ func (s *Schema) buildCreateSQLite() string {
 	// Misleading key type? - Yes. Gets the job done? - Also yes.
 
 	hasCompositePrimaryKey := false
-	hasIncrementingColumn := false
-	for index, column := range s.table.columns {
+	for _, column := range s.table.columns {
 		if column.incrementing {
-			hasIncrementingColumn = true
 			for _, c := range column.table.constraints {
 				if len(c.primaryColumns) == 1 {
 					c.primaryColumns = []string{}
@@ -886,17 +923,18 @@ func (s *Schema) buildCreateSQLite() string {
 			column.primary = true
 		}
 
-		if index == len(s.table.columns)-1 && hasIncrementingColumn && !s.HasUniqueConstraints() && !s.HasForeignKeys() {
-			sql += strings.TrimSuffix(s.buildColumn(column), ", ")
-		} else {
-			sql += s.buildColumn(column)
-		}
+		sql += s.buildColumn(column)
 	}
 
-	if !s.table.HasConstraints() && strings.HasSuffix(sql, ", ") {
-		sql = strings.TrimSuffix(sql, ", ")
-	}
-
+	// The separator after the last column used to be trimmed here, guarded by
+	// a list of the constraint kinds that might follow it — unique keys and
+	// foreign keys. A CHECK is neither, so the column ran straight into
+	// CONSTRAINT and SQLite refused the statement at "NOT NULLCONSTRAINT".
+	//
+	// Any guard shaped like that is wrong the next time a constraint kind is
+	// added, so there is no guard: append whatever the constraints render to,
+	// and let closeDefinition take the trailing separator off the end. It
+	// already did exactly that for every other dialect.
 	sql += s.buildConstraints()
 	sql = closeDefinition(sql)
 	sql += "\n);"
@@ -1112,6 +1150,22 @@ func (s *Schema) buildColumn(column *Column) string {
 	return sql + ", "
 }
 
+// requireAlterableConstraints refuses the combination SQLite cannot express.
+//
+// SQLite has no ALTER TABLE ADD/DROP CONSTRAINT: changing one means creating a
+// new table, copying the rows and swapping the names, which is a migration an
+// application writes deliberately rather than something a builder should
+// improvise under it. Refusing loudly beats emitting a statement the database
+// rejects at run time, and beats silently dropping the constraint — which is
+// the failure this whole change exists to remove.
+func (s *Schema) requireAlterableConstraints(what string) {
+	if s.dialect == DriverSQLite {
+		panic("migration: SQLite cannot alter a table's constraints, so " + what +
+			" a CHECK on " + s.tableName + " is not expressible; declare it in " +
+			"Create, or rebuild the table in the migration itself")
+	}
+}
+
 func (s *Schema) buildConstraints() string {
 	sql := ""
 	for _, constraint := range s.table.constraints {
@@ -1136,6 +1190,21 @@ func (s *Schema) buildConstraints() string {
 				// separate CREATE INDEX appended after the table instead.
 				sql += "INDEX " + constraint.index.name + " (" + s.buildColumns(constraint.index.columns) + "), "
 			}
+			if constraint.check != nil {
+				// Inside CREATE TABLE a constraint is part of the definition;
+				// in an ALTER it is an action, so it needs the verb. Without
+				// this the alter path emitted `ALTER TABLE t CONSTRAINT ...`,
+				// which no dialect accepts — and adding a check to a table
+				// that already exists is at least as common as declaring one
+				// with it.
+				verb := ""
+				if s.operation == "alter" {
+					s.requireAlterableConstraints("adding")
+					verb = "ADD "
+				}
+				sql += verb + "CONSTRAINT " + constraint.check.name +
+					" CHECK (" + constraint.check.expression + "), "
+			}
 			if constraint.foreignKey != nil {
 				sql += s.buildForeignKey(constraint.foreignKey) + ", "
 			}
@@ -1151,6 +1220,10 @@ func (s *Schema) buildConstraints() string {
 			}
 			if constraint.foreignKey != nil {
 				sql += "DROP FOREIGN KEY " + constraint.name + ", "
+			}
+			if constraint.check != nil {
+				s.requireAlterableConstraints("dropping")
+				sql += "DROP CONSTRAINT " + constraint.check.name + ", "
 			}
 		}
 	}

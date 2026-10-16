@@ -1,6 +1,9 @@
 package migration
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	DriverSQLite   = "sqlite"
@@ -131,6 +134,17 @@ func (dataType *DataType) WithScale(scale uint) *DataType {
 // WithEnumValues sets the enum values of the column
 func (dataType *DataType) WithEnumValues(enumValues []string) *DataType {
 	dataType.enumValues = enumValues
+	// The CHECK is appended here rather than in AddSuffixes, because
+	// AddSuffixes has already run: NewDataType calls it before the caller
+	// gets a chance to chain this on, so enumValues was always nil at that
+	// point and the constraint was never emitted. A column declared as an
+	// enum that accepts any string is worse than no column, since the schema
+	// claims it is constrained.
+	if dataType.driver == DriverPostgres && len(enumValues) > 0 &&
+		(dataType.genericName == ColTypeEnum || dataType.genericName == ColTypeSet) {
+		dataType.AppendSufix(fmt.Sprintf("CHECK (%s IN (%s))",
+			dataType.columnName, dataType.quotedEnumValues()))
+	}
 	return dataType
 }
 
@@ -171,7 +185,7 @@ func (dataType *DataType) ToString() string {
 	}
 
 	if dataType.driver == DriverMySQL && dataType.genericName == ColTypeEnum {
-		return fmt.Sprintf("%s(%s)", columnType, dataType.enumValues)
+		return fmt.Sprintf("%s(%s)", columnType, dataType.quotedEnumValues())
 	}
 
 	if dataType.length > 0 {
@@ -200,10 +214,8 @@ func (dataType *DataType) AddSuffixes() *DataType {
 		dataType.AppendSufix(fmt.Sprintf("CHECK (%s > 0)", dataType.columnName))
 	}
 
-	// If the driver is postgres and the column type is enum or set, add a check constraint
-	if dataType.driver == DriverPostgres && len(dataType.enumValues) > 0 && (dataType.genericName == ColTypeEnum || dataType.genericName == ColTypeSet) {
-		dataType.AppendSufix(fmt.Sprintf("CHECK (%s IN (%s))", dataType.columnName, dataType.enumValues))
-	}
+	// The enum CHECK is appended by WithEnumValues, not here: this runs
+	// before the values are supplied, so the condition could never be true.
 
 	return dataType
 }
@@ -220,4 +232,24 @@ func (dataType *DataType) Precision() uint {
 		return 0
 	}
 	return dataType.precision
+}
+
+// quotedEnumValues renders the permitted values as a SQL list.
+//
+// Both call sites used to interpolate the []string with %s, which is Go's
+// slice syntax — `[draft published]`, unquoted and space-separated. On MySQL
+// that produced an ENUM type no server would accept; on Postgres it would
+// have produced an unparsable CHECK, had the CHECK been reached at all.
+//
+// A single quote inside a value is doubled, which is SQL's own escape. These
+// values come from a migration rather than from a request, so this is not the
+// package's injection boundary — but a value like "it's fine" is ordinary
+// enough that silently truncating the literal at the apostrophe would be a
+// nasty surprise.
+func (dataType *DataType) quotedEnumValues() string {
+	quoted := make([]string, 0, len(dataType.enumValues))
+	for _, value := range dataType.enumValues {
+		quoted = append(quoted, "'"+strings.ReplaceAll(value, "'", "''")+"'")
+	}
+	return strings.Join(quoted, ", ")
 }

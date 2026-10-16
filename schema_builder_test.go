@@ -706,7 +706,11 @@ func TestSQLiteUniqueIndex(t *testing.T) {
 
 func TestMySQLUniqueIndex(t *testing.T) {
 	os.Setenv("DB_DRIVER", "mysql")
-	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nUNIQUE email_unique (email));"
+	// users_email_unique, not email_unique: the name is prefixed with the
+	// table now. A unique constraint is backed by an index in Postgres and an
+	// index name is schema-global there, so an unprefixed one belonged to
+	// whichever table migrated first.
+	expected := "CREATE TABLE users (\nemail VARCHAR(100) NOT NULL,\nUNIQUE users_email_unique (email));"
 
 	schema := Create("users", func(t *Table) {
 		t.String("email", 100)
