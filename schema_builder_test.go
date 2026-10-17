@@ -1183,3 +1183,81 @@ func TestOnlyMySQLRejectsIndexedText(t *testing.T) {
 		})
 	}
 }
+
+// A derived index name is right for a new table and wrong for an existing
+// one, which is the whole reason Name exists: a migration that has already
+// run has its index named in somebody's database, and a builder that cannot
+// reproduce that name forces the entire statement to be hand-written.
+func TestAnIndexCanKeepAnExistingName(t *testing.T) {
+	sql := CreateFor(DriverPostgres, "users", func(tb *Table) {
+		tb.BigIncrements("id").Primary()
+		tb.Boolean("profile_published")
+		tb.Index("profile_published", "id").Name("users_published_idx")
+	}).Build()
+
+	if !strings.Contains(sql, "CREATE INDEX users_published_idx ON users") {
+		t.Fatalf("explicit name not used:\n%s", sql)
+	}
+	// The derived name must be gone rather than emitted alongside it — two
+	// indexes on the same columns is a silent duplicate, not a near miss.
+	if strings.Contains(sql, "users_profile_published_id_index") {
+		t.Fatalf("derived name still present:\n%s", sql)
+	}
+}
+
+// The derived name is the default, because every migration already written
+// depends on it.
+func TestAnIndexWithoutANameIsStillDerived(t *testing.T) {
+	sql := CreateFor(DriverPostgres, "profile_links", func(tb *Table) {
+		tb.UnsignedBigInt("user_id")
+		tb.Int("position")
+		tb.Index("user_id", "position")
+	}).Build()
+
+	if !strings.Contains(sql, "profile_links_user_id_position_index") {
+		t.Fatalf("derived name missing:\n%s", sql)
+	}
+}
+
+// An empty string is not a choice anybody makes on purpose, and Postgres
+// would reject the statement a long way from the mistake.
+func TestAnEmptyNameIsIgnored(t *testing.T) {
+	sql := CreateFor(DriverPostgres, "posts", func(tb *Table) {
+		tb.UnsignedBigInt("user_id")
+		tb.Index("user_id").Name("")
+	}).Build()
+
+	if !strings.Contains(sql, "posts_user_id_index") {
+		t.Fatalf("empty name should have left the derived one in place:\n%s", sql)
+	}
+}
+
+// A unique constraint is backed by an index, so its name is schema-global
+// too — and it is the name Postgres reports when a row is refused, which is
+// the reason to want control of it.
+func TestAUniqueKeyCanBeNamed(t *testing.T) {
+	sql := CreateFor(DriverPostgres, "users", func(tb *Table) {
+		tb.String("email", 255)
+		tb.UniqueKey("email").Name("users_email_unique_idx")
+	}).Build()
+
+	if !strings.Contains(sql, "CONSTRAINT users_email_unique_idx UNIQUE (email)") {
+		t.Fatalf("named unique not emitted:\n%s", sql)
+	}
+}
+
+// Without a name Postgres stays anonymous, which is what every existing
+// migration generates. Promoting them would rewrite schemas that exist.
+func TestAnUnnamedUniqueKeyStaysAnonymousOnPostgres(t *testing.T) {
+	sql := CreateFor(DriverPostgres, "users", func(tb *Table) {
+		tb.String("email", 255)
+		tb.UniqueKey("email")
+	}).Build()
+
+	if strings.Contains(sql, "CONSTRAINT") {
+		t.Fatalf("an unnamed unique key gained a CONSTRAINT clause:\n%s", sql)
+	}
+	if !strings.Contains(sql, "UNIQUE (email)") {
+		t.Fatalf("anonymous unique missing:\n%s", sql)
+	}
+}

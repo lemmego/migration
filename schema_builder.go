@@ -17,6 +17,11 @@ type constraint struct {
 	foreignKey     *foreignKey
 	index          *index
 	check          *check
+	// named records that a caller set the identifier explicitly, as opposed
+	// to taking the derived one. Postgres emits an anonymous UNIQUE (...)
+	// otherwise, and promoting every one of them to a named CONSTRAINT would
+	// change the output of every migration already written.
+	named bool
 }
 
 // check is a CHECK constraint: a named boolean expression over the row.
@@ -444,7 +449,38 @@ func (t *Table) DropPrimaryKey() {
 }
 
 // Index adds an index to the table
-func (t *Table) Index(columns ...string) {
+// NamedConstraint is the handle Index and UniqueKey return, so a caller can
+// override the generated name.
+//
+// It exists because a derived name is right for a new table and wrong for an
+// existing one. Every index in a migration that has already run has a name in
+// somebody's database, and a schema builder that cannot reproduce it forces
+// the whole statement to be written by hand — which is how a project ends up
+// with eighty raw CREATE INDEX lines and a DSL used only for columns.
+//
+// Returning a handle rather than taking an optional argument keeps the common
+// call unchanged: t.Index("user_id") still reads as a statement, and the
+// return value is there for the one caller in twenty that needs it.
+type NamedConstraint struct{ c *constraint }
+
+// Name overrides the generated identifier.
+//
+// Empty is ignored rather than accepted, because an empty index name is not a
+// choice anybody makes on purpose and Postgres would reject the statement
+// much further from the mistake.
+func (n *NamedConstraint) Name(name string) *NamedConstraint {
+	if n == nil || n.c == nil || name == "" {
+		return n
+	}
+	n.c.name = name
+	if n.c.index != nil {
+		n.c.index.name = name
+	}
+	n.c.named = true
+	return n
+}
+
+func (t *Table) Index(columns ...string) *NamedConstraint {
 	// Always prefixed with the table. An index name is schema-global in
 	// Postgres, so the multi-column form — which used to be built from the
 	// columns alone — meant two tables wanting an index on (user_id,
@@ -460,6 +496,7 @@ func (t *Table) Index(columns ...string) {
 		},
 	}
 	t.constraints = append(t.constraints, c)
+	return &NamedConstraint{c: c}
 }
 
 // DropIndex drops an index from the table
@@ -472,7 +509,7 @@ func (t *Table) DropIndex(indexName string) {
 }
 
 // UniqueKey adds a unique constraint to the table
-func (t *Table) UniqueKey(columns ...string) {
+func (t *Table) UniqueKey(columns ...string) *NamedConstraint {
 	// The same rule as Index, and the bug here was the mirror image: the
 	// single-column branch overwrote the prefix it had just built, so
 	// `email_unique` belonged to whichever table migrated first. A unique
@@ -485,6 +522,7 @@ func (t *Table) UniqueKey(columns ...string) {
 		uniqueColumns: columns,
 	}
 	t.constraints = append(t.constraints, c)
+	return &NamedConstraint{c: c}
 }
 
 // DropUniqueKey drops a unique constraint from the table
@@ -1176,11 +1214,21 @@ func (s *Schema) buildConstraints() string {
 			}
 			if len(constraint.uniqueColumns) > 0 {
 				prefix := ""
-				if s.dialect == DriverPostgres {
-					prefix = "UNIQUE "
-				} else if s.dialect == DriverMySQL {
+				// An explicit name is emitted as a real CONSTRAINT on every
+				// dialect, because the caller asked for an identifier and a
+				// unique constraint that reports itself as
+				// users_email_key1 in an error is the reason they asked.
+				//
+				// Without one Postgres and SQLite stay anonymous and let the
+				// server derive it — not an oversight but the behaviour every
+				// migration already written depends on, so promoting them
+				// would rewrite schemas that exist.
+				switch {
+				case constraint.named:
+					prefix = "CONSTRAINT " + constraint.name + " UNIQUE "
+				case s.dialect == DriverMySQL:
 					prefix = "UNIQUE " + constraint.name + " "
-				} else if s.dialect == DriverSQLite {
+				default:
 					prefix = "UNIQUE "
 				}
 				sql += prefix + "(" + s.buildColumns(constraint.uniqueColumns) + "), "
