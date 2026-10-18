@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -869,20 +870,52 @@ func TestPostgresRenameColumn(t *testing.T) {
 	}
 }
 
-func TestSQLiteAlterColumn(t *testing.T) {
-	os.Setenv("DB_DRIVER", "sqlite")
-	expected := "ALTER TABLE users ALTER COLUMN name VARCHAR(100) NOT NULL;"
-
-	schema := Alter("users", func(t *Table) {
+// SQLite has no ALTER COLUMN, so changing one is refused rather than
+// rendered.
+//
+// This test used to assert the opposite — that Change() on SQLite emits
+// `ALTER TABLE users ALTER COLUMN name VARCHAR(100) NOT NULL` — and that
+// statement is a syntax error, which TestSQLiteHasNoAlterColumn below
+// demonstrates against a real connection rather than arguing from the
+// grammar. SQLite's ALTER TABLE does RENAME TABLE, RENAME COLUMN, ADD COLUMN
+// and DROP COLUMN; altering a column means rebuilding the table, which is a
+// migration an application writes for itself.
+//
+// Pinning unexecutable output is the Enum failure in a different place: the
+// builder produced something that reads correctly and no database accepts.
+func TestChangingAColumnIsRefusedOnSQLite(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected changing a column on SQLite to be refused")
+		}
+		if !strings.Contains(fmt.Sprint(r), "cannot alter a column") {
+			t.Errorf("unexpected panic: %v", r)
+		}
+	}()
+	AlterFor(DriverSQLite, "users", func(t *Table) {
 		t.String("name", 100).Change()
-
 	}).Build()
+}
 
-	normalizedExpected := normalizeSchema(expected)
-	normalizedSchema := normalizeSchema(schema)
-
-	if normalizedSchema != normalizedExpected {
-		t.Errorf("Expected schema to be %s, got %s", expected, schema)
+// The evidence for the refusal above, run rather than asserted.
+func TestSQLiteHasNoAlterColumn(t *testing.T) {
+	db, err := sql2open(t)
+	if err != nil {
+		t.Skipf("no sqlite: %v", err)
+	}
+	if _, err := db.Exec(
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL)`,
+	); err != nil {
+		t.Fatalf("creating the table: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE users ALTER COLUMN name VARCHAR(255)`); err == nil {
+		t.Fatal("SQLite accepted ALTER COLUMN — the refusal above is now wrong")
+	}
+	// And the one column change it does have, so the test is about ALTER
+	// COLUMN specifically rather than about ALTER TABLE being unusable.
+	if _, err := db.Exec(`ALTER TABLE users RENAME COLUMN name TO full_name`); err != nil {
+		t.Fatalf("SQLite refused RENAME COLUMN, which it does support: %v", err)
 	}
 }
 
@@ -904,7 +937,12 @@ func TestMySQLAlterColumn(t *testing.T) {
 
 func TestPostgresAlterColumn(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
-	expected := "ALTER TABLE users ALTER COLUMN name VARCHAR(100) NOT NULL;"
+	// Postgres has no verb for "restate this column", so a change is its
+	// parts: a type, a nullability, and a default when one is declared.
+	// `ALTER COLUMN name VARCHAR(100) NOT NULL` — what this expected before —
+	// is a syntax error, confirmed against a server.
+	expected := "ALTER TABLE users ALTER COLUMN name TYPE VARCHAR(100), " +
+		"ALTER COLUMN name SET NOT NULL;"
 
 	schema := Alter("users", func(t *Table) {
 		t.String("name", 100).Change()

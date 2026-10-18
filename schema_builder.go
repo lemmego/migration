@@ -17,6 +17,19 @@ type constraint struct {
 	foreignKey     *foreignKey
 	index          *index
 	check          *check
+	// ifExists tolerates the object being absent on a drop. See
+	// DropBuilder.IfExists.
+	ifExists bool
+	// kind is what this constraint *is*, for the drop path.
+	//
+	// An add knows from the field that is populated — primaryColumns, index,
+	// check and so on. A drop names an identifier and nothing else, so every
+	// one of those fields is nil and the discriminator has to be recorded
+	// separately. Without it DropIndex, DropUniqueKey, DropForeignKey and
+	// DropPrimaryKey each matched no branch and emitted nothing at all, which
+	// left `ALTER TABLE t ;` — a syntax error on Postgres, and a migration
+	// that appeared to drop something.
+	kind string
 	// named records that a caller set the identifier explicitly, as opposed
 	// to taking the derived one. Postgres emits an anonymous UNIQUE (...)
 	// otherwise, and promoting every one of them to a named CONSTRAINT would
@@ -37,6 +50,9 @@ type index struct {
 	// UNIQUE constraint on Postgres even though MySQL implements one with the
 	// other. UniqueKey declares the constraint; this declares the index.
 	unique bool
+	// where is a partial index's predicate. Postgres and SQLite only; see
+	// IndexBuilder.Where.
+	where string
 	// descending names the columns indexed in descending order. A set rather
 	// than a parallel slice, because the order that matters is the column
 	// order and a second ordered list to keep in step with it is a bug
@@ -147,6 +163,23 @@ func DropFor(dialect, tableName string) *Schema {
 }
 
 // Alter provides callback to alter an existing table, and returns a schema
+// AlterFor builds an ALTER for a named dialect, rather than for whatever
+// DB_DRIVER says.
+//
+// CreateFor and DropFor already existed and this did not, which meant an
+// alter could not be rendered for a dialect it was not running against — so
+// nothing about its portability was testable, and four of its drop helpers
+// emitted a syntax error on Postgres for as long as nobody looked.
+func AlterFor(dialect, tableName string, tableFunc func(t *Table)) *Schema {
+	s := NewSchemaFor(dialect)
+	s.operation = "alter"
+	s.tableName = tableName
+	t := &Table{name: tableName, dialect: s.dialect}
+	tableFunc(t)
+	s.table = t
+	return s
+}
+
 func Alter(tableName string, tableFunc func(t *Table)) *Schema {
 	s := NewSchema()
 	s.tableName = tableName
@@ -447,7 +480,7 @@ func (t *Table) PrimaryKey(columns ...string) {
 }
 
 // DropPrimaryKey drops the primary key from the table
-func (t *Table) DropPrimaryKey() {
+func (t *Table) DropPrimaryKey() *DropBuilder {
 	// panic if there is already an add operation for primary key
 	for _, c := range t.constraints {
 		if c.operation == "add" && len(c.primaryColumns) > 0 {
@@ -457,8 +490,10 @@ func (t *Table) DropPrimaryKey() {
 	c := &constraint{
 		name:      t.name + "_pkey",
 		operation: "drop",
+		kind:      "primary",
 	}
 	t.constraints = append(t.constraints, c)
+	return &DropBuilder{c: c}
 }
 
 // Index adds an index to the table
@@ -556,6 +591,28 @@ func (b *IndexBuilder) Unique() *IndexBuilder {
 	return b
 }
 
+// Where makes this a partial index, covering only the rows matching the
+// predicate.
+//
+// Postgres and SQLite both have them; **MySQL has no form of a partial index
+// at all**, so Validate refuses one rather than dropping the predicate. That
+// is the choice this package has got wrong before — Enum on Postgres emitted
+// no constraint and said nothing, which is worse than a malformed statement
+// because the schema looks right. An index that silently covers every row
+// instead of a tenth of them is the same failure: correct results, a plan
+// nobody can account for, and a table that grows an index it was promised
+// would stay small.
+//
+// A predicate is SQL, not a value, and it is interpolated. It belongs in a
+// migration beside the schema it constrains, never anywhere near user input.
+func (b *IndexBuilder) Where(predicate string) *IndexBuilder {
+	if b == nil || b.c == nil || b.c.index == nil || predicate == "" {
+		return b
+	}
+	b.c.index.where = predicate
+	return b
+}
+
 // Desc indexes the named columns in descending order.
 //
 // Named columns rather than a direction per position, and only columns
@@ -586,12 +643,14 @@ func (b *IndexBuilder) Desc(columns ...string) *IndexBuilder {
 }
 
 // DropIndex drops an index from the table
-func (t *Table) DropIndex(indexName string) {
+func (t *Table) DropIndex(indexName string) *DropBuilder {
 	c := &constraint{
 		name:      indexName,
 		operation: "drop",
+		kind:      "index",
 	}
 	t.constraints = append(t.constraints, c)
+	return &DropBuilder{c: c}
 }
 
 // UniqueKey adds a unique constraint to the table
@@ -612,12 +671,14 @@ func (t *Table) UniqueKey(columns ...string) *NamedConstraint {
 }
 
 // DropUniqueKey drops a unique constraint from the table
-func (t *Table) DropUniqueKey(name string) {
+func (t *Table) DropUniqueKey(name string) *DropBuilder {
 	c := &constraint{
 		name:      name,
 		operation: "drop",
+		kind:      "unique",
 	}
 	t.constraints = append(t.constraints, c)
+	return &DropBuilder{c: c}
 }
 
 // Check adds a named CHECK constraint to the table.
@@ -649,13 +710,38 @@ func (t *Table) Check(name string, expression string) {
 // SQLite cannot: it has no ALTER TABLE DROP CONSTRAINT, and removing one means
 // rebuilding the table. That is a migration an application writes for itself,
 // so this refuses rather than emitting something SQLite will reject.
-func (t *Table) DropCheck(name string) {
+func (t *Table) DropCheck(name string) *DropBuilder {
 	c := &constraint{
 		name:      name,
 		operation: "drop",
+		kind:      "check",
 		check:     &check{name: name},
 	}
 	t.constraints = append(t.constraints, c)
+	return &DropBuilder{c: c}
+}
+
+// DropBuilder is the handle every Drop* helper returns.
+//
+// It exists for IfExists, which a down migration almost always wants and an
+// up migration almost never does: reverting a change should not fail because
+// the thing it removes was already gone, while an up migration naming a
+// constraint that is not there has a typo in it and should say so.
+type DropBuilder struct{ c *constraint }
+
+// IfExists makes the drop tolerate the object being absent.
+//
+// Not available on MySQL for a constraint, an index or a key — it has no
+// IF EXISTS for any ALTER TABLE drop action, so Validate refuses it there
+// rather than emitting a statement the server will reject. Postgres has it
+// for all of them; SQLite has it for DROP INDEX, which is the only one of
+// these it can do at all.
+func (b *DropBuilder) IfExists() *DropBuilder {
+	if b == nil || b.c == nil {
+		return b
+	}
+	b.c.ifExists = true
+	return b
 }
 
 // ForeignID accepts an id column that references the primary column of another table
@@ -738,6 +824,27 @@ func (f *foreignKey) On(table string) *foreignKey {
 	return f
 }
 
+// Name gives the constraint an identifier.
+//
+// Opt-in, for the reason NamedConstraint.Name records: every foreign key this
+// package has emitted so far is anonymous, so Postgres named it
+// <table>_<column>_fkey and that is the name sitting in every database that
+// has run those migrations. Emitting the derived name by default would rename
+// all of them, which is the one thing a schema builder must not do to a schema
+// that already exists.
+//
+// It is what lets an existing hand-written constraint be restated rather than
+// replaced: a composite key added as
+// `ALTER TABLE endorsements ADD CONSTRAINT endorsements_claimed_skill ...`
+// can now be declared with the table and keep its name.
+func (f *foreignKey) Name(name string) *foreignKey {
+	if name == "" {
+		return f
+	}
+	f.name = name
+	return f
+}
+
 // OnDelete adds the ON DELETE clause to the foreign key
 func (f *foreignKey) OnDelete(onDelete string) *foreignKey {
 	f.onDelete = onDelete
@@ -751,12 +858,14 @@ func (f *foreignKey) OnUpdate(onUpdate string) *foreignKey {
 }
 
 // DropForeignKey drops a foreign key from the table
-func (t *Table) DropForeignKey(name string) {
+func (t *Table) DropForeignKey(name string) *DropBuilder {
 	c := &constraint{
 		name:      name,
 		operation: "drop",
+		kind:      "foreign",
 	}
 	t.constraints = append(t.constraints, c)
+	return &DropBuilder{c: c}
 }
 
 // Type adds a data type to the column
@@ -829,11 +938,106 @@ func (c *Column) Done() *Table {
 }
 
 // Build returns the SQL query for the schema
+// Json adds a document column.
+//
+// Postgres gets JSONB, MySQL gets JSON and SQLite gets TEXT — which is not a
+// fallback but the way SQLite stores JSON, since its JSON1 functions operate
+// on TEXT.
+//
+// No length argument, because none of the three takes one.
+func (t *Table) Json(name string) *Column {
+	return t.AddColumn(name, NewDataType(name, ColTypeJson, t.dialect))
+}
+
+// buildDropAction is one ALTER TABLE drop action, spelled the way this dialect
+// spells it.
+//
+// The three disagree more here than anywhere else in the builder, which is
+// why this is a switch rather than a format string:
+//
+//   - a primary key is DROP PRIMARY KEY on MySQL and DROP CONSTRAINT
+//     <table>_pkey on Postgres, which needs a name MySQL does not use;
+//   - a unique constraint is backed by an index on MySQL, so it goes with
+//     DROP INDEX, while Postgres drops the constraint;
+//   - a foreign key is DROP FOREIGN KEY on MySQL and DROP CONSTRAINT on
+//     Postgres;
+//   - an index is not an ALTER TABLE action at all outside MySQL — it is a
+//     statement of its own, emitted by droppedIndexes.
+//
+// SQLite can do none of them except dropping an index, and refuses rather
+// than emitting something it will reject.
+func (s *Schema) buildDropAction(c *constraint) string {
+	ifExists := ""
+	if c.ifExists {
+		ifExists = "IF EXISTS "
+	}
+
+	switch c.kind {
+	case "index":
+		if s.dialect != DriverMySQL {
+			// Emitted as its own DROP INDEX statement instead.
+			return ""
+		}
+		return "DROP INDEX " + c.name
+	case "primary":
+		s.requireAlterableConstraints("dropping")
+		if s.dialect == DriverMySQL {
+			return "DROP PRIMARY KEY"
+		}
+		return "DROP CONSTRAINT " + ifExists + c.name
+	case "unique":
+		s.requireAlterableConstraints("dropping")
+		if s.dialect == DriverMySQL {
+			return "DROP INDEX " + c.name
+		}
+		return "DROP CONSTRAINT " + ifExists + c.name
+	case "foreign":
+		s.requireAlterableConstraints("dropping")
+		if s.dialect == DriverMySQL {
+			return "DROP FOREIGN KEY " + c.name
+		}
+		return "DROP CONSTRAINT " + ifExists + c.name
+	case "check":
+		s.requireAlterableConstraints("dropping")
+		return "DROP CONSTRAINT " + ifExists + c.name
+	}
+	return ""
+}
+
+// droppedIndexes emits a DROP INDEX for every dialect that does not take one
+// as an ALTER TABLE action — which is every dialect but MySQL.
+//
+// Postgres and SQLite drop an index by name alone, without naming the table,
+// because an index name is schema-global in both.
+func (s *Schema) droppedIndexes() []string {
+	if s.table == nil || s.dialect == DriverMySQL {
+		return nil
+	}
+	var statements []string
+	for _, c := range s.table.constraints {
+		if c.operation != "drop" || c.kind != "index" {
+			continue
+		}
+		ifExists := ""
+		if c.ifExists {
+			ifExists = "IF EXISTS "
+		}
+		statements = append(statements, "DROP INDEX "+ifExists+c.name+";")
+	}
+	return statements
+}
+
 // unindexableMySQLTypes cannot carry an index without a key length. MySQL
 // rejects them outright: "BLOB/TEXT column used in key specification without a
 // key length" (Error 1170). Postgres and SQLite index them happily, so this is
 // a MySQL-only restriction.
 var unindexableMySQLTypes = map[string]bool{
+	// JSON is in here for a different reason than the rest: MySQL refuses it
+	// in a key outright rather than for want of a length ("JSON column
+	// 'data' cannot be used in key specification"), and no length would help.
+	// Indexing inside a JSON document there means a generated column over
+	// the extracted value, which is not something this builder can guess.
+	ColTypeJson:       true,
 	ColTypeText:       true,
 	ColTypeTinyText:   true,
 	ColTypeMediumText: true,
@@ -867,6 +1071,26 @@ func (s *Schema) Validate() error {
 	// Both of the checks below are dialect-independent: they catch a
 	// declaration that cannot mean what it says on any database.
 	for _, c := range s.table.constraints {
+		// MySQL has no IF EXISTS on any drop of a constraint, a key or an
+		// index — not on the ALTER TABLE action and not on DROP INDEX. The
+		// first version of this check exempted indexes and therefore dropped
+		// the request on the floor, which is the Enum failure again: the
+		// migration runs, the tolerance is gone, and the only sign is a
+		// rollback that fails on a second attempt.
+		if c.ifExists && s.dialect == DriverMySQL {
+			return fmt.Errorf(
+				"migration: %s: MySQL has no IF EXISTS when dropping %s — neither "+
+					"on an ALTER TABLE drop action nor on DROP INDEX; drop it "+
+					"unconditionally, or branch on the dialect",
+				s.tableName, c.name)
+		}
+		if c.index != nil && c.index.where != "" && s.dialect == DriverMySQL {
+			return fmt.Errorf(
+				"migration: %s: index %s has a WHERE predicate and MySQL has no "+
+					"partial index; declare it without Where, or branch on the "+
+					"dialect and write this one as raw SQL",
+				s.tableName, c.index.name)
+		}
 		if c.index != nil {
 			for column := range c.index.descending {
 				if !slices.Contains(c.index.columns, column) {
@@ -891,12 +1115,15 @@ func (s *Schema) Validate() error {
 		return nil
 	}
 
-	unindexable := map[string]bool{}
+	// Keyed to the type, not to a bool: the error's advice depends on which
+	// type it is, and "text or blob" was being passed as a literal — so a
+	// JSON column was told to declare itself as String(name, 255).
+	unindexable := map[string]string{}
 	for _, column := range s.table.columns {
 		if column.dataType == nil || !unindexableMySQLTypes[column.dataType.genericName] {
 			continue
 		}
-		unindexable[column.name] = true
+		unindexable[column.name] = column.dataType.genericName
 
 		if column.unique {
 			return unindexableColumnError(s.tableName, column.name, column.dataType.genericName, "UNIQUE")
@@ -913,15 +1140,15 @@ func (s *Schema) Validate() error {
 	for _, c := range s.table.constraints {
 		for _, group := range [][]string{c.primaryColumns, c.uniqueColumns} {
 			for _, name := range group {
-				if unindexable[name] {
-					return unindexableColumnError(s.tableName, name, "text or blob", "a key")
+				if kind, ok := unindexable[name]; ok {
+					return unindexableColumnError(s.tableName, name, kind, "a key")
 				}
 			}
 		}
 		if c.index != nil {
 			for _, name := range c.index.columns {
-				if unindexable[name] {
-					return unindexableColumnError(s.tableName, name, "text or blob", "an index")
+				if kind, ok := unindexable[name]; ok {
+					return unindexableColumnError(s.tableName, name, kind, "an index")
 				}
 			}
 		}
@@ -930,6 +1157,16 @@ func (s *Schema) Validate() error {
 }
 
 func unindexableColumnError(table, column, columnType, usage string) error {
+	// The advice has to match the reason. A TEXT column is refused for want
+	// of a key length, which a bounded String fixes; a JSON column is refused
+	// outright, and suggesting String(name, 255) there would be telling
+	// somebody to store a document in a 255-character field.
+	if columnType == ColTypeJson {
+		return fmt.Errorf(
+			"migration: %s.%s is json, which MySQL cannot use in %s at all; "+
+				"index a generated column over the extracted value instead",
+			table, column, usage)
+	}
 	return fmt.Errorf(
 		"migration: %s.%s is %s, which MySQL cannot use in %s without a key length; "+
 			"declare it with String(%q, 255) instead",
@@ -960,9 +1197,15 @@ func (s *Schema) Statements() []string {
 	}
 
 	statements := []string{}
-	if operation := s.buildOperation(); operation != "" {
+	if s.operation == "alter" {
+		// An alter can be several statements, because SQLite takes one action
+		// per ALTER TABLE. buildOperation joins them for Build; this keeps
+		// them separate, which is what Statements promises.
+		statements = append(statements, s.alterStatements()...)
+	} else if operation := s.buildOperation(); operation != "" {
 		statements = append(statements, operation)
 	}
+	statements = append(statements, s.droppedIndexes()...)
 	statements = append(statements, s.trailingIndexes()...)
 	return statements
 }
@@ -981,7 +1224,13 @@ func (s *Schema) trailingIndexStatements() string {
 }
 
 func (s *Schema) trailingIndexes() []string {
-	if s.table == nil || s.dialect == DriverMySQL || s.operation == "drop" {
+	if s.table == nil || s.operation == "drop" {
+		return nil
+	}
+	// MySQL takes an index inline, but only inside CREATE TABLE — there is no
+	// inline form in an ALTER, so one added there needs its own statement on
+	// every dialect.
+	if s.dialect == DriverMySQL && s.operation != "alter" {
 		return nil
 	}
 
@@ -994,8 +1243,12 @@ func (s *Schema) trailingIndexes() []string {
 		if constraint.index.unique {
 			keyword = "CREATE UNIQUE INDEX "
 		}
-		statements = append(statements, keyword+constraint.index.name+
-			" ON "+s.tableName+" ("+s.buildIndexColumns(constraint.index)+");")
+		statement := keyword + constraint.index.name +
+			" ON " + s.tableName + " (" + s.buildIndexColumns(constraint.index) + ")"
+		if constraint.index.where != "" {
+			statement += " WHERE " + constraint.index.where
+		}
+		statements = append(statements, statement+";")
 	}
 	return statements
 }
@@ -1024,15 +1277,156 @@ func (s *Schema) buildCreate() string {
 	return ""
 }
 
+// buildAlter assembles one ALTER TABLE from its actions.
+//
+// Actions are collected and joined rather than concatenated, which is a fix
+// as much as a tidy-up: the three dialect-specific versions this replaces
+// each appended straight onto one string, so two column operations in a
+// single Alter came out as `ADD COLUMN a INT ADD COLUMN b INT` with no comma
+// between them — valid-looking and refused by every server.
+//
+// An ALTER with no actions emits nothing at all. It used to emit
+// `ALTER TABLE t ;`, which is a syntax error on Postgres, and which was what
+// every migration that only dropped an index produced.
 func (s *Schema) buildAlter() string {
-	switch s.dialect {
-	case DriverSQLite:
-		return s.buildAlterSQLite()
-	case DriverMySQL:
-		return s.buildAlterMySQL()
-	case DriverPostgres:
-		return s.buildAlterPostgreSQL()
+	return strings.Join(s.alterStatements(), "\n")
+}
+
+// alterActions is every ALTER TABLE action this schema asks for, in the order
+// it was declared.
+func (s *Schema) alterActions() []string {
+	actions := []string{}
+
+	for _, column := range s.table.columns {
+		switch column.operation {
+		case "add":
+			actions = append(actions, "ADD COLUMN "+s.columnDefinition(column))
+		case "drop":
+			actions = append(actions, "DROP COLUMN "+column.name)
+		case "alter":
+			actions = append(actions, s.changeColumn(column)...)
+		case "rename":
+			actions = append(actions, "RENAME COLUMN "+column.oldName+" TO "+column.name)
+		}
 	}
+
+	for _, constraint := range s.table.constraints {
+		switch constraint.operation {
+		case "add":
+			if action := s.buildAddAction(constraint); action != "" {
+				actions = append(actions, action)
+			}
+		case "drop":
+			if action := s.buildDropAction(constraint); action != "" {
+				actions = append(actions, action)
+			}
+		}
+	}
+
+	return actions
+}
+
+// alterStatements is the ALTER TABLE work as individual statements.
+//
+// Postgres and MySQL take a comma-separated list of actions in one statement.
+// **SQLite takes exactly one**: its ALTER TABLE grammar is RENAME TO, RENAME
+// COLUMN, ADD COLUMN or DROP COLUMN, singular, so
+// `ALTER TABLE t ADD COLUMN a INT, ADD COLUMN b INT` is a syntax error there.
+// Found by executing the output rather than by reading it, which is the whole
+// reason alter_execution_test.go exists.
+func (s *Schema) alterStatements() []string {
+	if s.table == nil || s.operation != "alter" {
+		return nil
+	}
+	return s.alterStatementsFrom(s.alterActions())
+}
+
+func (s *Schema) alterStatementsFrom(actions []string) []string {
+	if len(actions) == 0 {
+		return nil
+	}
+	if s.dialect == DriverSQLite {
+		statements := make([]string, 0, len(actions))
+		for _, action := range actions {
+			statements = append(statements, "ALTER TABLE "+s.tableName+" "+action+";")
+		}
+		return statements
+	}
+	return []string{"ALTER TABLE " + s.tableName + " " + strings.Join(actions, ", ") + ";"}
+}
+
+// columnDefinition is a column's full declaration, without the separator the
+// CREATE path needs.
+func (s *Schema) columnDefinition(column *Column) string {
+	return strings.TrimSuffix(strings.TrimSpace(s.buildColumn(column)), ",")
+}
+
+// changeColumn is what "this column should now look like this" becomes.
+//
+// One action on MySQL and SQLite, which both restate the whole column.
+// Several on Postgres, which has no such verb: it changes a type, a
+// nullability and a default as three separate actions, and `ALTER COLUMN x
+// VARCHAR(255)` — what this used to emit — is a syntax error there. Verified
+// against a server rather than read off the grammar.
+func (s *Schema) changeColumn(column *Column) []string {
+	if s.dialect == DriverMySQL {
+		return []string{"MODIFY COLUMN " + s.columnDefinition(column)}
+	}
+	if s.dialect == DriverSQLite {
+		// SQLite has no column alteration at all beyond a rename: changing a
+		// type or a nullability means rebuilding the table. Refusing is the
+		// same choice DropCheck already makes.
+		panic("migration: SQLite cannot alter a column's type or nullability, so " +
+			"changing " + s.tableName + "." + column.name + " is not expressible; " +
+			"rebuild the table in the migration itself")
+	}
+
+	actions := []string{}
+	if column.dataType != nil {
+		actions = append(actions,
+			"ALTER COLUMN "+column.name+" TYPE "+column.dataType.ToString())
+	}
+	if column.nullable {
+		actions = append(actions, "ALTER COLUMN "+column.name+" DROP NOT NULL")
+	} else {
+		actions = append(actions, "ALTER COLUMN "+column.name+" SET NOT NULL")
+	}
+	if column.hasDefault {
+		if literal, err := defaultLiteralWithPrecision(
+			s.dialect, column.defaultValue, column.dataType.Precision(),
+		); err == nil {
+			actions = append(actions,
+				"ALTER COLUMN "+column.name+" SET DEFAULT "+literal)
+		}
+	}
+	return actions
+}
+
+// buildAddAction is one ALTER TABLE add action.
+//
+// The CREATE path renders these as part of a table definition; in an ALTER
+// each one is an action and needs its verb, which is why they are not the
+// same code.
+func (s *Schema) buildAddAction(c *constraint) string {
+	switch {
+	case len(c.primaryColumns) > 0:
+		return "ADD PRIMARY KEY (" + s.buildColumns(c.primaryColumns) + ")"
+	case len(c.uniqueColumns) > 0:
+		s.requireAlterableConstraints("adding")
+		if c.named {
+			return "ADD CONSTRAINT " + c.name + " UNIQUE (" + s.buildColumns(c.uniqueColumns) + ")"
+		}
+		return "ADD UNIQUE (" + s.buildColumns(c.uniqueColumns) + ")"
+	case c.check != nil:
+		s.requireAlterableConstraints("adding")
+		return "ADD CONSTRAINT " + c.check.name + " CHECK (" + c.check.expression + ")"
+	case c.foreignKey != nil:
+		s.requireAlterableConstraints("adding")
+		return "ADD " + strings.TrimSpace(s.buildForeignKey(c.foreignKey))
+	}
+	// An index added in an ALTER comes out as its own CREATE INDEX, from
+	// trailingIndexes — including on MySQL, where the inline form has no
+	// ALTER equivalent.
 	return ""
 }
 
@@ -1171,81 +1565,6 @@ func (s *Schema) buildCreatePostgreSQL() string {
 	sql += s.buildConstraints()
 	sql = closeDefinition(sql)
 	sql += ");"
-	return sql
-}
-
-func (s *Schema) buildAlterSQLite() string {
-	sql := "ALTER TABLE " + s.tableName + " "
-	for index, column := range s.table.columns {
-		columnStr := ""
-		if index == len(s.table.columns)-1 {
-			columnStr = strings.TrimSuffix(s.buildColumn(column), ", ")
-		} else {
-			columnStr = s.buildColumn(column)
-		}
-		switch column.operation {
-		case "add":
-			sql += "ADD COLUMN " + columnStr
-		case "drop":
-			sql += "DROP COLUMN " + column.name
-		case "alter":
-			sql += "ALTER COLUMN " + columnStr
-		case "rename":
-			sql += "RENAME COLUMN " + column.oldName + " TO " + column.name
-		}
-	}
-	sql += s.buildConstraints()
-	sql += ";"
-	return sql
-}
-
-func (s *Schema) buildAlterMySQL() string {
-	sql := "ALTER TABLE " + s.tableName + " "
-	for index, column := range s.table.columns {
-		columnStr := ""
-		if index == len(s.table.columns)-1 {
-			columnStr = strings.TrimSuffix(s.buildColumn(column), ", ")
-		} else {
-			columnStr = s.buildColumn(column)
-		}
-		switch column.operation {
-		case "add":
-			sql += "ADD COLUMN " + columnStr
-		case "drop":
-			sql += "DROP COLUMN " + column.name
-		case "alter":
-			sql += "MODIFY COLUMN " + columnStr
-		case "rename":
-			sql += "RENAME COLUMN " + column.oldName + " TO " + column.name
-		}
-	}
-	sql += s.buildConstraints()
-	sql += ";"
-	return sql
-}
-
-func (s *Schema) buildAlterPostgreSQL() string {
-	sql := "ALTER TABLE " + s.tableName + " "
-	for index, column := range s.table.columns {
-		columnStr := ""
-		if index == len(s.table.columns)-1 {
-			columnStr = strings.TrimSuffix(s.buildColumn(column), ", ")
-		} else {
-			columnStr = s.buildColumn(column)
-		}
-		switch column.operation {
-		case "add":
-			sql += "ADD COLUMN " + columnStr
-		case "drop":
-			sql += "DROP COLUMN " + column.name
-		case "alter":
-			sql += "ALTER COLUMN " + columnStr
-		case "rename":
-			sql += "RENAME COLUMN " + column.oldName + " TO " + column.name
-		}
-	}
-	sql += s.buildConstraints()
-	sql += ";"
 	return sql
 }
 
@@ -1388,21 +1707,8 @@ func (s *Schema) buildConstraints() string {
 				sql += s.buildForeignKey(constraint.foreignKey) + ", "
 			}
 		case "drop":
-			if len(constraint.primaryColumns) > 0 {
-				sql += "DROP PRIMARY KEY, "
-			}
-			if len(constraint.uniqueColumns) > 0 {
-				sql += "DROP UNIQUE (" + s.buildColumns(constraint.uniqueColumns) + "), "
-			}
-			if constraint.index != nil {
-				sql += "DROP INDEX " + constraint.index.name + ", "
-			}
-			if constraint.foreignKey != nil {
-				sql += "DROP FOREIGN KEY " + constraint.name + ", "
-			}
-			if constraint.check != nil {
-				s.requireAlterableConstraints("dropping")
-				sql += "DROP CONSTRAINT " + constraint.check.name + ", "
+			if action := s.buildDropAction(constraint); action != "" {
+				sql += action + ", "
 			}
 		}
 	}

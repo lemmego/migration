@@ -200,10 +200,21 @@ migration.Create("endorsements", func(t *migration.Table) {
     // expressed.
     t.Check("endorsements_not_self", "endorser_id <> user_id")
 
+    // A document column. Postgres gets JSONB, MySQL gets JSON, SQLite gets
+    // TEXT — which is not a fallback but the way SQLite stores JSON, since
+    // its JSON1 functions operate on TEXT.
+    t.Json("payload").Nullable()
+
     // A composite foreign key: one constraint over the pair, which two
     // single-column keys do not express. Neither of them would refuse a row
     // naming a user and a skill that are never paired.
+    //
+    // Name is opt-in. Without it the key is anonymous and the server derives
+    // one, which is what every key this package emitted before v0.5.0 did —
+    // so naming by default would rename all of them. Use it to restate a
+    // constraint that already exists under a name of its own.
     t.Foreign("user_id", "skill_id").
+        Name("endorsements_claimed_skill").
         References("user_id", "skill_id").
         On("user_skills").
         OnDelete("CASCADE")
@@ -230,6 +241,14 @@ migration.Create("endorsements", func(t *migration.Table) {
 
     // The constraint form.
     t.UniqueKey("user_id", "note").Name("endorsements_one_note")
+
+    // A partial index, covering only the rows that match. Postgres and
+    // SQLite have them; MySQL has none, and Validate refuses one there
+    // rather than dropping the predicate — an index silently covering every
+    // row gives correct results and a plan nobody can account for.
+    t.Index("user_id").
+        Where("note <> ''").
+        Name("endorsements_annotated_idx")
 })
 ```
 
@@ -239,12 +258,48 @@ dialect, rather than letting the driver report them from further away: a
 referencing a different number of columns than it carries. `Build` calls
 `Validate` and panics; call `Validate` yourself to check without panicking.
 
+### Altering a table
+
+```go
+migration.Alter("posts", func(t *migration.Table) {
+    t.Int("view_count").Default(0)              // ADD COLUMN
+    t.String("slug", 160).Nullable().Change()   // change type, nullability, default
+    t.DropColumn("legacy_body")
+    t.RenameColumn("body", "body_source")
+
+    t.DropIndex("posts_author_idx")
+    t.DropUniqueKey("posts_slug_unique")
+    t.DropForeignKey("posts_author_fk")
+    t.DropCheck("posts_kind_valid").IfExists()  // for a down migration
+    t.DropPrimaryKey()
+})
+```
+
+Each of these is spelled differently by the three dialects, which is most of
+the reason to declare rather than write them:
+
+| | Postgres | MySQL | SQLite |
+|---|---|---|---|
+| drop a primary key | `DROP CONSTRAINT <table>_pkey` | `DROP PRIMARY KEY` | refused |
+| drop a unique key | `DROP CONSTRAINT <name>` | `DROP INDEX <name>` | refused |
+| drop a foreign key | `DROP CONSTRAINT <name>` | `DROP FOREIGN KEY <name>` | refused |
+| drop an index | `DROP INDEX <name>`, its own statement | `ALTER TABLE … DROP INDEX <name>` | `DROP INDEX <name>` |
+| change a column | `ALTER COLUMN … TYPE …`, plus `SET`/`DROP NOT NULL` | `MODIFY COLUMN …` | refused |
+| several actions | one statement, comma-separated | one statement, comma-separated | **one statement each** |
+
+`IfExists` is for a down migration, which should not fail because the thing it
+removes is already gone. MySQL has no `IF EXISTS` on any of these — not on an
+`ALTER TABLE` drop action and not on `DROP INDEX` — so `Validate` refuses it
+there rather than quietly dropping the tolerance.
+
+`AlterFor(dialect, table, fn)` builds one for a named dialect, the way
+`CreateFor` does, which is how the table above is tested.
+
 #### What still needs raw SQL
 
 Migrations are `func(tx *sql.Tx) error`, so `tx.Exec` is the sanctioned
 escape hatch. These have no portable form and are not pretending to:
 
-- **Partial indexes** (`WHERE`). Postgres and SQLite take one; MySQL does not.
 - **Expression and operator-class indexes**, `tsvector`, `GIN`/`GiST` —
   Postgres only.
 - **Functions and triggers.** `plpgsql` is Postgres, MySQL's trigger syntax
@@ -252,6 +307,10 @@ escape hatch. These have no portable form and are not pretending to:
 - **Generated columns**, whose expression is dialect-specific.
 - **`COMMENT ON`**. Postgres and MySQL have it in different shapes; SQLite
   has none.
+- **Altering a column or a constraint on SQLite**, which means rebuilding the
+  table. Refused rather than rendered, because what SQLite's `ALTER TABLE`
+  accepts is `RENAME TO`, `RENAME COLUMN`, `ADD COLUMN` and `DROP COLUMN`,
+  and nothing else.
 
 #### A note on auto-increment keys
 

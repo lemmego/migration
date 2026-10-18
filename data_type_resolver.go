@@ -30,6 +30,7 @@ const (
 	ColTypeChar          = "char"
 	ColTypeVarchar       = "varchar"
 	ColTypeText          = "text"
+	ColTypeJson          = "json"
 	ColTypeTinyText      = "tinyText"
 	ColTypeMediumText    = "mediumText"
 	ColTypeLongText      = "longText"
@@ -84,6 +85,15 @@ var dataTypes = []DataType{
 	{genericName: ColTypeChar, sqliteName: "CHAR", mysqlName: "CHAR", postgresName: "CHAR"},
 	{genericName: ColTypeVarchar, sqliteName: "VARCHAR", mysqlName: "VARCHAR", postgresName: "VARCHAR"},
 	{genericName: ColTypeText, sqliteName: "TEXT", mysqlName: "TEXT", postgresName: "TEXT"},
+	// JSONB on Postgres rather than JSON: it stores a parsed form, so it is
+	// cheaper to read than to write and it can carry a GIN index, which is
+	// the trade a document column in a table almost always wants. The cost is
+	// that key order is not preserved and duplicate keys collapse — both
+	// properties of JSON objects rather than of this choice.
+	//
+	// SQLite has no JSON type. It stores JSON as TEXT and its JSON1 functions
+	// operate on TEXT, so TEXT is not a fallback here, it is the answer.
+	{genericName: ColTypeJson, sqliteName: "TEXT", mysqlName: "JSON", postgresName: "JSONB"},
 	{genericName: ColTypeTinyText, sqliteName: "TINYTEXT", mysqlName: "TINYTEXT", postgresName: "TEXT"},
 	{genericName: ColTypeMediumText, sqliteName: "MEDIUMTEXT", mysqlName: "MEDIUMTEXT", postgresName: "TEXT"},
 	{genericName: ColTypeLongText, sqliteName: "LONGTEXT", mysqlName: "LONGTEXT", postgresName: "TEXT"},
