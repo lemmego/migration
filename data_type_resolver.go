@@ -207,10 +207,40 @@ func (dataType *DataType) ToString() string {
 	return columnType
 }
 
+// autoIncrements reports whether this type is a generated surrogate key.
+func (dataType *DataType) autoIncrements() bool {
+	return dataType.genericName == ColTypeIncrements ||
+		dataType.genericName == ColTypeBigIncrements
+}
+
 // AddSuffixes adds suffixes to the column type
 func (dataType *DataType) AddSuffixes() *DataType {
-	// If the driver is postgres and the column type is unsigned, add a check constraint
-	if dataType.driver == DriverPostgres && dataType.unsigned {
+	// An unsigned column on Postgres becomes a CHECK, because Postgres has no
+	// unsigned integers — except for an auto-increment key, which gets
+	// nothing.
+	//
+	// SERIAL and BIGSERIAL already draw from a sequence that starts at 1 and
+	// ascends, so the CHECK is a per-insert validation that cannot fail. The
+	// reason to drop it is not the cost, though: it is that one declaration
+	// was producing three different schemas. The same BigIncrements("id")
+	// gave Postgres a CHECK, MySQL an UNSIGNED column type and SQLite
+	// nothing — so a project moving between them did not get the table it
+	// wrote, and a Postgres table built by this package could not be matched
+	// by one written by hand. For a surrogate key the portable answer is the
+	// dialect's own auto-increment type and no extra constraint.
+	//
+	// This is in practice the only path that reached the CHECK at all, which
+	// is worth recording because it is not what it looks like. An explicit
+	// UnsignedInt("views") sets the flag through Column.Unsigned, which runs
+	// *after* NewDataType has already called AddSuffixes — so the suffix is
+	// decided before the column is marked, and no CHECK is ever appended.
+	// MySQL is unaffected because its UNSIGNED is read at render time instead.
+	// It is the same ordering bug Enum has, and it is left alone here rather
+	// than fixed in passing: deciding what an unsigned column should assert
+	// on Postgres is a design question — a counter wants >= 0 and the suffix
+	// says > 0 — and answering it would add a constraint to every table
+	// already built with one of those columns.
+	if dataType.driver == DriverPostgres && dataType.unsigned && !dataType.autoIncrements() {
 		dataType.AppendSufix(fmt.Sprintf("CHECK (%s > 0)", dataType.columnName))
 	}
 

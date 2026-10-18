@@ -33,13 +33,26 @@ type check struct {
 type index struct {
 	name    string
 	columns []string
+	// unique makes this a unique *index*, which is not the same object as a
+	// UNIQUE constraint on Postgres even though MySQL implements one with the
+	// other. UniqueKey declares the constraint; this declares the index.
+	unique bool
+	// descending names the columns indexed in descending order. A set rather
+	// than a parallel slice, because the order that matters is the column
+	// order and a second ordered list to keep in step with it is a bug
+	// waiting for somebody to insert a column in the middle.
+	descending map[string]bool
 }
 
 type foreignKey struct {
-	name       string
-	table      *Table
-	columns    []string
-	references string
+	name    string
+	table   *Table
+	columns []string
+	// references is the referenced column list. A slice because a composite
+	// key is referenced as a whole: FOREIGN KEY (a, b) REFERENCES t (a, b) is
+	// one constraint over a pair, and two single-column keys do not mean the
+	// same thing — neither of them requires the pair to exist together.
+	references []string
 	on         string
 	onDelete   string
 	onUpdate   string
@@ -480,7 +493,7 @@ func (n *NamedConstraint) Name(name string) *NamedConstraint {
 	return n
 }
 
-func (t *Table) Index(columns ...string) *NamedConstraint {
+func (t *Table) Index(columns ...string) *IndexBuilder {
 	// Always prefixed with the table. An index name is schema-global in
 	// Postgres, so the multi-column form — which used to be built from the
 	// columns alone — meant two tables wanting an index on (user_id,
@@ -491,12 +504,85 @@ func (t *Table) Index(columns ...string) *NamedConstraint {
 		name:      indexName,
 		operation: "add",
 		index: &index{
-			name:    indexName,
-			columns: columns,
+			name:       indexName,
+			columns:    columns,
+			descending: map[string]bool{},
 		},
 	}
 	t.constraints = append(t.constraints, c)
-	return &NamedConstraint{c: c}
+	return &IndexBuilder{c: c}
+}
+
+// IndexBuilder is the handle Index returns.
+//
+// Separate from NamedConstraint, which UniqueKey still returns, because
+// Unique and Desc mean something on an index and nothing on a unique
+// constraint — and a method that silently does nothing is worse than one that
+// is not there to call.
+type IndexBuilder struct{ c *constraint }
+
+// Name overrides the generated identifier. See NamedConstraint.Name for why
+// this exists at all.
+func (b *IndexBuilder) Name(name string) *IndexBuilder {
+	if b == nil || b.c == nil || name == "" {
+		return b
+	}
+	b.c.name = name
+	if b.c.index != nil {
+		b.c.index.name = name
+	}
+	b.c.named = true
+	return b
+}
+
+// Unique makes this a unique index.
+//
+// Not the same thing as UniqueKey, and the difference is not cosmetic: on
+// Postgres a UNIQUE constraint and a unique index are different catalog
+// objects, so a migration that declared one cannot be reproduced with the
+// other — pg_dump renders a constraint as ALTER TABLE ... ADD CONSTRAINT and
+// an index as CREATE UNIQUE INDEX. MySQL implements the constraint *with* an
+// index, which is why the distinction is easy to miss until a schema has to
+// be matched rather than merely created.
+//
+// Reach for UniqueKey when the uniqueness is part of what the table is, and
+// for this when it is an index that happens to be unique — a lookup key, or
+// one you will later want a partial predicate on.
+func (b *IndexBuilder) Unique() *IndexBuilder {
+	if b == nil || b.c == nil || b.c.index == nil {
+		return b
+	}
+	b.c.index.unique = true
+	return b
+}
+
+// Desc indexes the named columns in descending order.
+//
+// Named columns rather than a direction per position, and only columns
+// already in the index: writing the direction into the column list — as
+// Index("created_at DESC") — happens to work today because the builder joins
+// its arguments verbatim, and stops working the day it quotes an identifier,
+// at which point the index is built against a column that does not exist.
+//
+// A column named here that is not in the index is an error reported by
+// Validate rather than ignored, because the ignored version is an index
+// silently sorted the wrong way and a query plan nobody can explain.
+//
+// Postgres, MySQL 8.0 and SQLite 3.8.3 all honour a descending index key.
+// Only MySQL before 8.0 parsed and discarded it, which is also the version
+// that cannot do a CHECK, so a schema built by this package has already left
+// it behind.
+func (b *IndexBuilder) Desc(columns ...string) *IndexBuilder {
+	if b == nil || b.c == nil || b.c.index == nil {
+		return b
+	}
+	if b.c.index.descending == nil {
+		b.c.index.descending = map[string]bool{}
+	}
+	for _, column := range columns {
+		b.c.index.descending[column] = true
+	}
+	return b
 }
 
 // DropIndex drops an index from the table
@@ -577,7 +663,7 @@ func (t *Table) ForeignID(column string) *foreignKey {
 	fk := &foreignKey{
 		table:      t,
 		columns:    []string{column},
-		references: "id",
+		references: []string{"id"},
 	}
 	fkName := column
 	c := &constraint{
@@ -611,7 +697,7 @@ func (t *Table) Foreign(columns ...string) *foreignKey {
 
 // Constrained is shorthand of .References("id").On("pluralized_table_name")
 func (f *foreignKey) Constrained() *foreignKey {
-	f.references = "id"
+	f.references = []string{"id"}
 	referencedTable := guessPluralizedTableNameFromColumnName(f.columns[0])
 	f.on = referencedTable
 	return f
@@ -621,14 +707,28 @@ func (f *foreignKey) Constrained() *foreignKey {
 func (f *foreignKey) ConstrainedFunc(fn func(t *Table) (table, indexName string)) *foreignKey {
 	table, indexName := fn(f.table)
 	f.name = indexName
-	f.references = "id"
+	f.references = []string{"id"}
 	f.on = table
 	return f
 }
 
-// References sets the column that the foreign key references
-func (f *foreignKey) References(column string) *foreignKey {
-	f.references = column
+// References sets the columns that the foreign key references.
+//
+// Variadic, so References("id") reads exactly as it did, and a composite key
+// becomes sayable: Foreign("user_id", "skill_id").References("user_id",
+// "skill_id").On("user_skills") is one constraint requiring the pair to exist
+// together, which two single-column keys do not express — neither of them
+// would stop a row naming a user and a skill that are never paired.
+//
+// The referenced columns must carry a unique or primary key in that order, on
+// every dialect. Validate checks the count against the referencing columns;
+// whether the target is actually unique is the database's to refuse, since
+// the target table is usually not the one being built here.
+func (f *foreignKey) References(columns ...string) *foreignKey {
+	if len(columns) == 0 {
+		return f
+	}
+	f.references = columns
 	return f
 }
 
@@ -764,6 +864,29 @@ func (s *Schema) Validate() error {
 		}
 	}
 
+	// Both of the checks below are dialect-independent: they catch a
+	// declaration that cannot mean what it says on any database.
+	for _, c := range s.table.constraints {
+		if c.index != nil {
+			for column := range c.index.descending {
+				if !slices.Contains(c.index.columns, column) {
+					return fmt.Errorf(
+						"migration: %s: index %s orders %q descending but does not index it; "+
+							"name it in Index(...) as well, or drop it from Desc(...)",
+						s.tableName, c.index.name, column)
+				}
+			}
+		}
+		if c.foreignKey != nil && len(c.foreignKey.references) > 0 &&
+			len(c.foreignKey.references) != len(c.foreignKey.columns) {
+			return fmt.Errorf(
+				"migration: %s: foreign key on (%s) references (%s) — a composite key "+
+					"must reference exactly as many columns as it carries",
+				s.tableName, strings.Join(c.foreignKey.columns, ", "),
+				strings.Join(c.foreignKey.references, ", "))
+		}
+	}
+
 	if s.dialect != DriverMySQL {
 		return nil
 	}
@@ -867,8 +990,12 @@ func (s *Schema) trailingIndexes() []string {
 		if constraint.index == nil || constraint.operation == "drop" {
 			continue
 		}
-		statements = append(statements, "CREATE INDEX "+constraint.index.name+
-			" ON "+s.tableName+" ("+s.buildColumns(constraint.index.columns)+");")
+		keyword := "CREATE INDEX "
+		if constraint.index.unique {
+			keyword = "CREATE UNIQUE INDEX "
+		}
+		statements = append(statements, keyword+constraint.index.name+
+			" ON "+s.tableName+" ("+s.buildIndexColumns(constraint.index)+");")
 	}
 	return statements
 }
@@ -1236,7 +1363,11 @@ func (s *Schema) buildConstraints() string {
 			if constraint.index != nil && s.dialect == DriverMySQL {
 				// Inline INDEX is a MySQL extension. The other dialects get a
 				// separate CREATE INDEX appended after the table instead.
-				sql += "INDEX " + constraint.index.name + " (" + s.buildColumns(constraint.index.columns) + "), "
+				keyword := "INDEX "
+				if constraint.index.unique {
+					keyword = "UNIQUE INDEX "
+				}
+				sql += keyword + constraint.index.name + " (" + s.buildIndexColumns(constraint.index) + "), "
 			}
 			if constraint.check != nil {
 				// Inside CREATE TABLE a constraint is part of the definition;
@@ -1290,7 +1421,7 @@ func (s *Schema) buildForeignKey(fk *foreignKey) string {
 		sql += "\n"
 	}
 
-	sql += "FOREIGN KEY (" + s.buildColumns(fk.columns) + ") REFERENCES " + fk.on + "(" + fk.references + ")"
+	sql += "FOREIGN KEY (" + s.buildColumns(fk.columns) + ") REFERENCES " + fk.on + "(" + s.buildColumns(fk.references) + ")"
 	if fk.onDelete != "" {
 		sql += " ON DELETE " + fk.onDelete
 	}
@@ -1298,6 +1429,31 @@ func (s *Schema) buildForeignKey(fk *foreignKey) string {
 		sql += " ON UPDATE " + fk.onUpdate
 	}
 	return sql
+}
+
+// buildIndexColumns renders an index's key, with a direction where one was
+// asked for.
+//
+// Separate from buildColumns because a direction belongs to an index key and
+// to nothing else: a primary key, a unique constraint and a foreign key are
+// column lists, and appending ASC/DESC to any of them is a syntax error on at
+// least one dialect.
+func (s *Schema) buildIndexColumns(idx *index) string {
+	if idx == nil {
+		return ""
+	}
+	if len(idx.descending) == 0 {
+		return s.buildColumns(idx.columns)
+	}
+	rendered := make([]string, 0, len(idx.columns))
+	for _, column := range idx.columns {
+		if idx.descending[column] {
+			rendered = append(rendered, column+" DESC")
+			continue
+		}
+		rendered = append(rendered, column)
+	}
+	return strings.Join(rendered, ", ")
 }
 
 func (s *Schema) buildColumns(columns []string) string {

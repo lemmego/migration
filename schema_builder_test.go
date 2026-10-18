@@ -42,7 +42,7 @@ func TestMySQLIncrements(t *testing.T) {
 
 func TestPostgresIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
-	expected := "CREATE TABLE users (\nid SERIAL NOT NULL PRIMARY KEY CHECK (id > 0));"
+	expected := "CREATE TABLE users (\nid SERIAL NOT NULL PRIMARY KEY);"
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()
@@ -90,7 +90,7 @@ func TestMySQLBigIncrements(t *testing.T) {
 
 func TestPostgresBigIncrements(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
-	expected := "CREATE TABLE users (\nid BIGSERIAL NOT NULL PRIMARY KEY CHECK (id > 0));"
+	expected := "CREATE TABLE users (\nid BIGSERIAL NOT NULL PRIMARY KEY);"
 
 	schema := Create("users", func(t *Table) {
 		t.BigIncrements("id").Primary()
@@ -522,7 +522,7 @@ func TestMySQLForeignKey(t *testing.T) {
 
 func TestPostgresForeignKey(t *testing.T) {
 	os.Setenv("DB_DRIVER", "postgres")
-	expected := "CREATE TABLE users (\nid SERIAL NOT NULL PRIMARY KEY CHECK (id > 0),\nrole_id INTEGER NOT NULL,\nFOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE);"
+	expected := "CREATE TABLE users (\nid SERIAL NOT NULL PRIMARY KEY,\nrole_id INTEGER NOT NULL,\nFOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE);"
 
 	schema := Create("users", func(t *Table) {
 		t.Increments("id").Primary()

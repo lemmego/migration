@@ -178,6 +178,95 @@ E.g.:
 
 There is also a `migrate status` command to see which migrations are currently pending and/or completed.
 
+### Indexes, keys and constraints
+
+Everything in this section renders per dialect, which is the reason to say it
+here rather than in raw SQL: the same declaration becomes a separate
+`CREATE INDEX` on Postgres and SQLite and an inline `INDEX` clause on MySQL,
+and the same integer becomes `BIGSERIAL` or `BIGINT UNSIGNED` or `BIGINT`. A
+hand-written statement is correct for exactly one vendor.
+
+```go
+migration.Create("endorsements", func(t *migration.Table) {
+    t.UnsignedBigInt("endorser_id")
+    t.UnsignedBigInt("user_id")
+    t.UnsignedBigInt("skill_id")
+    t.String("note", 140).Default("")
+    t.TimestampTz("created_at", 0).Default(migration.Expr("CURRENT_TIMESTAMP"))
+
+    // A value set, a range, a format. CHECK is standard SQL: Postgres,
+    // MySQL 8.0.16+ and SQLite all enforce one. Enum() does not — it emits
+    // no constraint at all on Postgres — so this is how a closed set is
+    // expressed.
+    t.Check("endorsements_not_self", "endorser_id <> user_id")
+
+    // A composite foreign key: one constraint over the pair, which two
+    // single-column keys do not express. Neither of them would refuse a row
+    // naming a user and a skill that are never paired.
+    t.Foreign("user_id", "skill_id").
+        References("user_id", "skill_id").
+        On("user_skills").
+        OnDelete("CASCADE")
+
+    // An index, with the name it already has in somebody's database. The
+    // derived name is right for a new table and wrong for an existing one.
+    t.Index("user_id", "created_at").Name("endorsements_recent_idx")
+
+    // Newest first. Postgres, MySQL 8.0 and SQLite 3.8.3 all honour a
+    // descending key. Desc names a column already in the index — writing the
+    // direction into the column list works only because the builder joins
+    // its arguments verbatim, and breaks the day it quotes an identifier.
+    t.Index("user_id", "created_at").
+        Desc("created_at").
+        Name("endorsements_feed_idx")
+
+    // A unique *index*, which is not a unique constraint. On Postgres they
+    // are different catalog objects, so a schema being matched rather than
+    // merely created has to produce the right one; MySQL implements the
+    // constraint with an index, which is what makes the distinction easy to
+    // lose. Use UniqueKey when the uniqueness is part of what the table is,
+    // and this when it is a lookup index that happens to be unique.
+    t.Index("skill_id", "user_id").Unique().Name("endorsements_pair_key")
+
+    // The constraint form.
+    t.UniqueKey("user_id", "note").Name("endorsements_one_note")
+})
+```
+
+`Validate` refuses two declarations that cannot mean what they say on any
+dialect, rather than letting the driver report them from further away: a
+`Desc` naming a column the index does not carry, and a composite foreign key
+referencing a different number of columns than it carries. `Build` calls
+`Validate` and panics; call `Validate` yourself to check without panicking.
+
+#### What still needs raw SQL
+
+Migrations are `func(tx *sql.Tx) error`, so `tx.Exec` is the sanctioned
+escape hatch. These have no portable form and are not pretending to:
+
+- **Partial indexes** (`WHERE`). Postgres and SQLite take one; MySQL does not.
+- **Expression and operator-class indexes**, `tsvector`, `GIN`/`GiST` —
+  Postgres only.
+- **Functions and triggers.** `plpgsql` is Postgres, MySQL's trigger syntax
+  differs, and SQLite has no stored functions at all.
+- **Generated columns**, whose expression is dialect-specific.
+- **`COMMENT ON`**. Postgres and MySQL have it in different shapes; SQLite
+  has none.
+
+#### A note on auto-increment keys
+
+`BigIncrements` and `Increments` emit the dialect's own auto-increment type
+and no extra constraint. Before v0.4.0 the Postgres path also appended
+`CHECK (id > 0)`, so one declaration produced three different schemas — a
+CHECK on Postgres, an `UNSIGNED` column type on MySQL, nothing on SQLite —
+and a generated table could not be matched by a hand-written one. A sequence
+starting at 1 and ascending cannot violate it, so nothing is lost.
+
+`Column.Unsigned()` on Postgres emits nothing, and never has:
+`NewDataType` appends suffixes before the column is marked, the same ordering
+that makes `Enum` silent. MySQL honours it, because its `UNSIGNED` is read
+when the type is rendered.
+
 ### Adding "migrate" command to an existing command:
 If your project already has a command, say `rootCmd`, you could add the `MigrateCmd` to that command to take full control of the package:
 
