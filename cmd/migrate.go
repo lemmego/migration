@@ -52,6 +52,35 @@ func GetDSN(cmd *cobra.Command, driver string) (string, error) {
 		return "", err
 	}
 
+	// DATABASE_URL_UNPOOLED first, because a migration must not run through a
+	// transaction pooler.
+	//
+	// Neon and Supabase both publish two URLs for one database: a pooled one
+	// fronted by PgBouncer in transaction mode, and a direct one. Their
+	// documentation steers applications at the pooled URL, so that is what
+	// lands in a deployment's environment as DATABASE_URL — and it is the
+	// wrong endpoint for this command twice over.
+	//
+	// lib/pq issues every parameterised query on the *unnamed* prepared
+	// statement over the extended protocol. Under transaction pooling a Parse
+	// from one logical connection pairs with a Bind from another, which fails
+	// as "bind message supplies N parameters, but prepared statement \"\"
+	// requires M" — intermittently, and in both directions. The migrator's own
+	// bookkeeping queries are parameterised, so a schema change can fail
+	// halfway through a deploy and report a message about a statement nobody
+	// wrote.
+	//
+	// Pooled connections are also session-less by design, so anything a
+	// migration does that outlives a statement — an advisory lock, a SET, a
+	// session-scoped temp table — silently applies to whichever backend
+	// answered rather than to the migration.
+	//
+	// An explicit --dsn still wins, because somebody naming an endpoint has
+	// said which one they mean.
+	if dsnStr == "" {
+		dsnStr = os.Getenv("DATABASE_URL_UNPOOLED")
+	}
+
 	if dsnStr == "" {
 		dsnStr = os.Getenv("DATABASE_URL")
 	}
