@@ -260,14 +260,12 @@ func (m *Migrator) Down(step int) error {
 	// A step is a number of *migrations*, counted back from the most recently
 	// applied, and zero means the whole of the latest batch.
 	//
-	// It used to be a number of batches, which is the same thing only when
-	// every batch holds one migration — and the flag that reaches this says
-	// "Number of migrations to execute", as does Up, which has always counted
-	// migrations. The gap between the two was quiet and expensive: on any
-	// project whose migrations were applied in a single `migrate up`, and
-	// that is every project on its first deploy, the latest batch is the
-	// entire schema. `migrate down --step 1`, asking to undo one migration,
-	// dropped all of it. Fourteen tables, from a flag that promised one.
+	// Counting batches instead would be the same thing only when every batch
+	// holds one migration. On a project whose schema went up in a single
+	// `migrate up` — every project on its first deploy — the latest batch is
+	// the entire schema, so `--step 1` would revert all of it. Up counts
+	// migrations too, and the flag reaching both says "Number of migrations
+	// to execute".
 	//
 	// The test that was supposed to cover this applied its two migrations in
 	// two separate Up calls, so one batch held one migration and both

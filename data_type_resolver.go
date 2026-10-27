@@ -276,10 +276,9 @@ func (dataType *DataType) Precision() uint {
 
 // quotedEnumValues renders the permitted values as a SQL list.
 //
-// Both call sites used to interpolate the []string with %s, which is Go's
-// slice syntax — `[draft published]`, unquoted and space-separated. On MySQL
-// that produced an ENUM type no server would accept; on Postgres it would
-// have produced an unparsable CHECK, had the CHECK been reached at all.
+// Use this rather than interpolating the []string directly: %s renders Go's
+// slice syntax — `[draft published]`, unquoted and space-separated — which is
+// an ENUM no MySQL server accepts and an unparsable CHECK on Postgres.
 //
 // A single quote inside a value is doubled, which is SQL's own escape. These
 // values come from a migration rather than from a request, so this is not the

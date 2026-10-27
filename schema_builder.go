@@ -529,11 +529,11 @@ func (n *NamedConstraint) Name(name string) *NamedConstraint {
 }
 
 func (t *Table) Index(columns ...string) *IndexBuilder {
-	// Always prefixed with the table. An index name is schema-global in
-	// Postgres, so the multi-column form — which used to be built from the
-	// columns alone — meant two tables wanting an index on (user_id,
-	// position) collided on `user_id_position_index`. The whole migration
-	// batch runs in one transaction, so the second one took the batch down.
+	// Always prefixed with the table, because an index name is schema-global
+	// in Postgres. Naming from the columns alone would collide: two tables
+	// each wanting an index on (user_id, position) would both ask for
+	// `user_id_position_index`. The whole batch runs in one transaction, so
+	// the second would take the migration down with it.
 	indexName := t.name + "_" + strings.Join(columns, "_") + "_index"
 	c := &constraint{
 		name:      indexName,
@@ -1073,9 +1073,8 @@ func (s *Schema) Validate() error {
 	for _, c := range s.table.constraints {
 		// MySQL has no IF EXISTS on any drop of a constraint, a key or an
 		// index — not on the ALTER TABLE action and not on DROP INDEX. The
-		// first version of this check exempted indexes and therefore dropped
-		// the request on the floor, which is the Enum failure again: the
-		// migration runs, the tolerance is gone, and the only sign is a
+		// check covers indexes too: exempting them would silently discard the
+		// tolerance the caller asked for, and the only sign would be a
 		// rollback that fails on a second attempt.
 		if c.ifExists && s.dialect == DriverMySQL {
 			return fmt.Errorf(
@@ -1285,9 +1284,9 @@ func (s *Schema) buildCreate() string {
 // single Alter came out as `ADD COLUMN a INT ADD COLUMN b INT` with no comma
 // between them — valid-looking and refused by every server.
 //
-// An ALTER with no actions emits nothing at all. It used to emit
-// `ALTER TABLE t ;`, which is a syntax error on Postgres, and which was what
-// every migration that only dropped an index produced.
+// An ALTER with no actions emits nothing at all, rather than
+// `ALTER TABLE t ;` — a syntax error on Postgres, and what a migration that
+// only drops an index would otherwise produce.
 func (s *Schema) buildAlter() string {
 	return strings.Join(s.alterStatements(), "\n")
 }
@@ -1365,9 +1364,9 @@ func (s *Schema) columnDefinition(column *Column) string {
 //
 // One action on MySQL and SQLite, which both restate the whole column.
 // Several on Postgres, which has no such verb: it changes a type, a
-// nullability and a default as three separate actions, and `ALTER COLUMN x
-// VARCHAR(255)` — what this used to emit — is a syntax error there. Verified
-// against a server rather than read off the grammar.
+// nullability and a default as three separate actions. `ALTER COLUMN x
+// VARCHAR(255)` is a syntax error there. Verified against a server rather
+// than read off the grammar.
 func (s *Schema) changeColumn(column *Column) []string {
 	if s.dialect == DriverMySQL {
 		return []string{"MODIFY COLUMN " + s.columnDefinition(column)}
@@ -1485,14 +1484,14 @@ func (s *Schema) buildCreateSQLite() string {
 		sql += s.buildColumn(column)
 	}
 
-	// The separator after the last column used to be trimmed here, guarded by
-	// a list of the constraint kinds that might follow it — unique keys and
-	// foreign keys. A CHECK is neither, so the column ran straight into
-	// CONSTRAINT and SQLite refused the statement at "NOT NULLCONSTRAINT".
+	// The separator after the last column is not trimmed here, and must not
+	// be. Trimming it needs a guard listing every constraint kind that might
+	// follow, and such a list is wrong the next time a kind is added — miss
+	// one and the column runs straight into CONSTRAINT, which SQLite refuses
+	// at "NOT NULLCONSTRAINT".
 	//
-	// Any guard shaped like that is wrong the next time a constraint kind is
-	// added, so there is no guard: append whatever the constraints render to,
-	// and let closeDefinition take the trailing separator off the end. It
+	// So append whatever the constraints render to and let closeDefinition
+	// take the trailing separator off the end. It
 	// already did exactly that for every other dialect.
 	sql += s.buildConstraints()
 	sql = closeDefinition(sql)
