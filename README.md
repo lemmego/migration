@@ -315,11 +315,8 @@ escape hatch. These have no portable form and are not pretending to:
 #### A note on auto-increment keys
 
 `BigIncrements` and `Increments` emit the dialect's own auto-increment type
-and no extra constraint. Before v0.4.0 the Postgres path also appended
-`CHECK (id > 0)`, so one declaration produced three different schemas — a
-CHECK on Postgres, an `UNSIGNED` column type on MySQL, nothing on SQLite —
-and a generated table could not be matched by a hand-written one. A sequence
-starting at 1 and ascending cannot violate it, so nothing is lost.
+and no extra constraint, so one declaration gives you a column a hand-written
+table can match on every dialect.
 
 `Column.Unsigned()` on Postgres emits nothing, and never has:
 `NewDataType` appends suffixes before the column is marked, the same ordering
