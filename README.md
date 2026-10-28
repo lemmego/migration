@@ -2,6 +2,26 @@
 
 A simple to use database schema migration tool for go applications.
 
+## Register your driver
+
+This module does not import a `database/sql` driver, so your application does:
+
+```go
+import _ "github.com/lib/pq"              // postgres
+import _ "github.com/glebarez/go-sqlite"  // sqlite
+import _ "github.com/go-sql-driver/mysql" // mysql
+```
+
+`lemmego new` writes the one your project chose. If you are adding a database
+to an existing project, add it yourself — a missing driver fails when the
+connection opens, with `database/sql`'s own message naming the forgotten
+import. That is at boot, on every environment, so it is not a mistake you can
+ship.
+
+It used to import all three, so every project linked the two it had never
+configured; the pure-Go sqlite driver alone is twenty-nine packages of
+translated libc.
+
 ## Installation
 
 Open your favorite terminal app and cd into your go module enabled project root:
