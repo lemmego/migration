@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -272,4 +273,84 @@ func countBatches(t *testing.T, db *sql.DB) int {
 		t.Fatal(err)
 	}
 	return count
+}
+
+// Registering one version twice registers it once.
+//
+// Migrations is a map and was always overwritten correctly; Versions is the
+// ORDERED list the runner walks, and the version used to be appended to it
+// unconditionally. So a second call ran that migration twice, and the second
+// run met the table the first had just created:
+//
+//	Running migration 20261118160000
+//	Finished running migration 20261118160000
+//	Running migration 20261118160000
+//	pq: relation "shifts" already exists
+//
+// Nothing caught it because every caller registered from init, which runs
+// once per process. It appeared the moment a host started collecting
+// migrations from compiled-in feature modules and calling AddMigration per
+// composed application — which a test binary does several times.
+func TestAddingOneVersionTwiceRegistersItOnce(t *testing.T) {
+	m := &Migrator{Migrations: map[string]*Migration{}}
+
+	first := &Migration{Version: "20260101000000"}
+	second := &Migration{Version: "20260102000000"}
+
+	m.AddMigration(first)
+	m.AddMigration(second)
+	m.AddMigration(first)
+
+	if len(m.Versions) != 2 {
+		t.Fatalf("Versions = %v, want two entries — the runner walks this list, so "+
+			"a repeated version runs its migration twice", m.Versions)
+	}
+	if len(m.Migrations) != 2 {
+		t.Errorf("Migrations holds %d, want 2", len(m.Migrations))
+	}
+	// And still sorted, which is what the insertion sort is for.
+	if m.Versions[0] > m.Versions[1] {
+		t.Errorf("Versions = %v, not in order", m.Versions)
+	}
+}
+
+// Re-registering a version replaces what runs, rather than keeping the first
+// registration.
+//
+// The map was always the authority, and this pins that: a host that composes
+// an application twice gets the second composition's closures, which is what
+// it asked for.
+func TestReRegisteringAVersionReplacesIt(t *testing.T) {
+	m := &Migrator{Migrations: map[string]*Migration{}}
+
+	m.AddMigration(&Migration{Version: "20260101000000"})
+	replacement := &Migration{Version: "20260101000000"}
+	m.AddMigration(replacement)
+
+	if m.Migrations["20260101000000"] != replacement {
+		t.Error("the second registration did not replace the first")
+	}
+	if len(m.Versions) != 1 {
+		t.Errorf("Versions = %v, want one entry", m.Versions)
+	}
+}
+
+// Insertion order does not change the result, because the runner depends on
+// Versions being sorted and a host hands modules over in whatever order its
+// composition root lists them.
+func TestVersionsAreSortedWhateverTheOrderOfRegistration(t *testing.T) {
+	for _, order := range [][]string{
+		{"3", "1", "2"},
+		{"1", "2", "3"},
+		{"2", "3", "1"},
+		{"3", "2", "1"},
+	} {
+		m := &Migrator{Migrations: map[string]*Migration{}}
+		for _, version := range order {
+			m.AddMigration(&Migration{Version: version})
+		}
+		if got := strings.Join(m.Versions, ""); got != "123" {
+			t.Errorf("registering %v gave %v", order, m.Versions)
+		}
+	}
 }

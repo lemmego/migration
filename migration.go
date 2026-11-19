@@ -58,12 +58,33 @@ func (m *Migrator) Dialect() string {
 	return m.dialect
 }
 
+// AddMigration registers a migration, replacing any already registered under
+// the same version.
+//
+// Idempotent, which it was not: Migrations is a map keyed on the version and
+// was overwritten correctly, but Versions is the ORDERED list the runner
+// walks and the version was appended to it unconditionally. So a second call
+// for one version ran that migration twice — and the second run met the
+// table the first had just created.
+//
+// It went unnoticed because every caller in this ecosystem registered from
+// init, which runs once per process. It surfaced the moment a host began
+// collecting migrations from compiled-in feature modules and calling this
+// per composed application, which a test binary does several times. A
+// registration function that duplicates on a second call is a trap for
+// exactly that pattern.
 func (m *Migrator) AddMigration(mg *Migration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Add the migration to the hash with version as key
+	_, already := m.Migrations[mg.Version]
 	m.Migrations[mg.Version] = mg
+	if already {
+		// Already in Versions, in the right place. Replacing the map entry
+		// is the whole of the update.
+		return
+	}
 
 	// Insert version into versions array using insertion sort
 	index := 0
