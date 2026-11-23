@@ -357,6 +357,29 @@ func (m *Migrator) Down(step int) error {
 	return nil
 }
 
+// Fresh reverses every registered migration currently applied to the database,
+// then applies the complete current migration set. It is intentionally
+// destructive: application data is removed when each migration's Down runs.
+// Init must be called first so the database's applied migrations are known.
+func (m *Migrator) Fresh() error {
+	if m == nil || m.db == nil {
+		return errors.New("migration: Fresh requires Init to be called first")
+	}
+	var applied int
+	if err := m.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
+		return fmt.Errorf("migration: counting applied migrations for fresh: %w", err)
+	}
+	if applied > 0 {
+		if err := m.Down(applied); err != nil {
+			return fmt.Errorf("migration: reverting applied migrations for fresh: %w", err)
+		}
+	}
+	if err := m.Up(0); err != nil {
+		return fmt.Errorf("migration: applying migrations for fresh: %w", err)
+	}
+	return nil
+}
+
 // Status checks which migrations have run and which have not
 func (m *Migrator) MigrationStatus() error {
 	m.mu.Lock()

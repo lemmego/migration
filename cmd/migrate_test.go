@@ -111,3 +111,19 @@ func TestGetDSNTreatsAnEmptyUnpooledURLAsAbsent(t *testing.T) {
 		t.Errorf("GetDSN() = %q, want %q", got, pooled)
 	}
 }
+
+func TestMigrateFreshCommandIsRegisteredWithDatabaseFlags(t *testing.T) {
+	var fresh *cobra.Command
+	for _, command := range MigrateCmd.Commands() {
+		if command.Name() == "fresh" {
+			fresh = command
+			break
+		}
+	}
+	if fresh == nil {
+		t.Fatal("migrate fresh command is not registered")
+	}
+	if fresh.Flags().Lookup("driver") == nil || fresh.Flags().Lookup("dsn") == nil {
+		t.Fatal("migrate fresh must accept the same driver and DSN options as up/down")
+	}
+}

@@ -257,6 +257,70 @@ func TestDownWithNoStepTakesTheLatestBatch(t *testing.T) {
 	}
 }
 
+func TestFreshDropsEveryAppliedBatchAndReappliesAllMigrations(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	upCount, downCount := 0, 0
+	m.AddMigration(&Migration{
+		Version: "001",
+		Up: func(tx *sql.Tx) error {
+			upCount++
+			_, err := tx.Exec(`CREATE TABLE fresh_first (id INTEGER PRIMARY KEY)`)
+			return err
+		},
+		Down: func(tx *sql.Tx) error {
+			downCount++
+			_, err := tx.Exec(`DROP TABLE fresh_first`)
+			return err
+		},
+	})
+	m.AddMigration(&Migration{
+		Version: "002",
+		Up: func(tx *sql.Tx) error {
+			upCount++
+			_, err := tx.Exec(`CREATE TABLE fresh_second (id INTEGER PRIMARY KEY)`)
+			return err
+		},
+		Down: func(tx *sql.Tx) error {
+			downCount++
+			_, err := tx.Exec(`DROP TABLE fresh_second`)
+			return err
+		},
+	})
+	if err := m.Up(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Up(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO fresh_first VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Fresh(); err != nil {
+		t.Fatalf("Fresh(): %v", err)
+	}
+	if upCount != 4 || downCount != 2 {
+		t.Fatalf("migration calls after fresh: up=%d down=%d, want up=4 down=2", upCount, downCount)
+	}
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM fresh_first`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatalf("fresh_first rows = %d, want 0 after recreate", rows)
+	}
+	if !m.Migrations["001"].done || !m.Migrations["002"].done {
+		t.Fatal("Fresh did not mark the complete migration set applied")
+	}
+	var applied int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 2 {
+		t.Fatalf("applied migrations = %d, want 2", applied)
+	}
+}
+
 func countMigrations(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var count int

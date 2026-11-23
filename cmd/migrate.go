@@ -188,6 +188,33 @@ var migrateDownCmd = &cobra.Command{
 	},
 }
 
+var migrateFreshCmd = &cobra.Command{
+	Use:   "fresh",
+	Short: "drop all migrated schema and rerun every migration",
+	Long:  "Destructively roll back every registered migration currently applied, then run the full migration set from the beginning.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		driver, err := GetDriver(cmd)
+		if err != nil {
+			return err
+		}
+		dsnStr, err := GetDSN(cmd, driver)
+		if err != nil {
+			return err
+		}
+		db := migration.NewDB(dsnStr, driver)
+		if db == nil {
+			return fmt.Errorf("unable to connect to the database")
+		}
+		defer db.Close()
+		migrator, err := migration.Init(db, driver)
+		if err != nil {
+			return fmt.Errorf("unable to initialize migrator: %w", err)
+		}
+		fmt.Println("Refreshing database: all applied migration data will be removed")
+		return migrator.Fresh()
+	},
+}
+
 var migrateStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "display status of each migrations",
@@ -237,10 +264,13 @@ func init() {
 	migrateDownCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateDownCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
+	migrateFreshCmd.Flags().StringP("driver", "d", "", "Driver Name")
+	migrateFreshCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+
 	// Add "--driver" and "--dsn" flags to "status" command
 	migrateStatusCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
 
 	// Add "create", "status", "up" and "down" commands to the "migrate" command
-	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateCreateCmd, migrateStatusCmd)
+	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateFreshCmd, migrateCreateCmd, migrateStatusCmd)
 }

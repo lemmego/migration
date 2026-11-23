@@ -198,6 +198,16 @@ E.g.:
 
 There is also a `migrate status` command to see which migrations are currently pending and/or completed.
 
+For local development, `migrate fresh` reverses every registered migration
+currently applied, then runs the full current migration set from the beginning:
+
+```sh
+go run . migrate fresh
+```
+
+This is destructive: data created by migrations is removed when their `Down`
+functions run. Do not use it against a database whose data you need to keep.
+
 ### Indexes, keys and constraints
 
 Everything in this section renders per dialect, which is the reason to say it
