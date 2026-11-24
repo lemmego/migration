@@ -102,9 +102,15 @@ func (m *Migrator) AddMigration(mg *Migration) {
 
 // Init populates the fields of Migrator and returns it
 func Init(db *sql.DB, dialect string) (*Migrator, error) {
-	if dialect != DriverSQLite && dialect != DriverMySQL && dialect != DriverPostgres {
-		return nil, errors.New("unsupported driver")
+	// Normalised, so that Init(db, "libsql") or Init(db, "pgx") works rather
+	// than being refused for a spelling. The error names the value it was
+	// given, which "unsupported driver" alone did not.
+	normalised, ok := NormaliseDialect(dialect)
+	if !ok {
+		return nil, fmt.Errorf("migration: %w %q, want one of %s",
+			ErrUnsupportedDialect, dialect, strings.Join(SupportedDialects(), ", "))
 	}
+	dialect = normalised
 
 	m := migrator
 	m.mu.Lock()

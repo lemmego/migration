@@ -107,12 +107,25 @@ type Schema struct {
 	table     *Table
 }
 
+// determineDialect reads DB_DRIVER and normalises it.
+//
+// An unrecognised value is returned UNCHANGED rather than defaulted, so that
+// Validate can name what was actually written. Defaulting here is one half of
+// a bug this used to have: a typo'd DB_DRIVER silently generated SQLite DDL,
+// which a Postgres server then refused with a syntax error near AUTOINCREMENT
+// — and the value it was handed never appeared anywhere.
 func determineDialect() string {
-	if dialect := os.Getenv("DB_DRIVER"); dialect != "" {
+	raw := os.Getenv("DB_DRIVER")
+	if raw == "" {
+		// Unset is the one case that legitimately defaults: a project with no
+		// database configured gets sqlite, which is what the generators
+		// assume too.
+		return DriverSQLite
+	}
+	if dialect, ok := NormaliseDialect(raw); ok {
 		return dialect
 	}
-	// default to sqlite
-	return "sqlite"
+	return raw
 }
 
 // NewSchema creates a new schema based on the driver provided in the environment variable DB_DRIVER
@@ -1052,6 +1065,21 @@ var unindexableMySQLTypes = map[string]bool{
 // surface while building the statement rather than as a driver error part-way
 // through a migration.
 func (s *Schema) Validate() error {
+	// First, and deliberately before the table == nil return below, because a
+	// Drop carries no table and would otherwise skip this entirely.
+	//
+	// Without this an unrecognised dialect produced no DDL at all and said
+	// nothing: buildCreate and buildDrop had no default branch and returned
+	// "", while Statements went on appending droppedIndexes and
+	// trailingIndexes — so a migration emitted CREATE INDEX with no CREATE
+	// TABLE and reported success.
+	if _, ok := NormaliseDialect(s.dialect); !ok {
+		return fmt.Errorf(
+			"migration: %w %q; DB_DRIVER must name one of %s, or an alias of "+
+				"one (sqlite3, libsql, mariadb, postgresql, pgsql, pgx)",
+			ErrUnsupportedDialect, s.dialect, strings.Join(SupportedDialects(), ", "))
+	}
+
 	if s.table == nil {
 		return nil
 	}
@@ -1273,7 +1301,11 @@ func (s *Schema) buildCreate() string {
 	case DriverPostgres:
 		return s.buildCreatePostgreSQL()
 	}
-	return ""
+	// Unreachable through Build or Statements, both of which call Validate
+	// first. Kept loud rather than returning "" so that a future caller
+	// reaching this directly gets an error instead of a migration that
+	// quietly emits nothing.
+	panic(fmt.Sprintf("migration: cannot generate DDL for dialect %q", s.dialect))
 }
 
 // buildAlter assembles one ALTER TABLE from its actions.
@@ -1438,7 +1470,11 @@ func (s *Schema) buildDrop() string {
 	case DriverPostgres:
 		return s.buildDropPostgreSQL()
 	}
-	return ""
+	// Unreachable through Build or Statements, both of which call Validate
+	// first. Kept loud rather than returning "" so that a future caller
+	// reaching this directly gets an error instead of a migration that
+	// quietly emits nothing.
+	panic(fmt.Sprintf("migration: cannot generate DDL for dialect %q", s.dialect))
 }
 
 func (s *Schema) buildCreateSQLite() string {

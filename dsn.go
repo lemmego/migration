@@ -12,6 +12,44 @@ var (
 	ErrUnsupportedDialect = errors.New("unsupported driver")
 )
 
+// dialectAliases maps the driver names people write in configuration onto the
+// three dialects this module generates DDL for.
+//
+// It duplicates api/db.ParseDialect on purpose: api requires this module, so
+// importing api/db here would be a cycle. ormconnector imports both and pins
+// the two vocabularies together with a test, which is the arrangement that
+// keeps the duplication honest.
+//
+// libsql resolves to sqlite because libSQL is a fork of SQLite and its DDL is
+// SQLite's. Note that DataSource deliberately does NOT accept it: a libSQL
+// server's address is a URL, and normalising it here would have DataSource
+// build a sqlite FILE path for it — silently opening a local file instead of
+// connecting to the server.
+var dialectAliases = map[string]string{
+	DriverSQLite:   DriverSQLite,
+	"sqlite3":      DriverSQLite,
+	"libsql":       DriverSQLite,
+	DriverMySQL:    DriverMySQL,
+	"mariadb":      DriverMySQL,
+	DriverPostgres: DriverPostgres,
+	"postgresql":   DriverPostgres,
+	"pgsql":        DriverPostgres,
+	"pgx":          DriverPostgres,
+}
+
+// NormaliseDialect maps a configured driver name onto the dialect whose DDL
+// this module generates. The second result is false for a name it does not
+// know, which callers must treat as an error rather than a default.
+func NormaliseDialect(driver string) (string, bool) {
+	dialect, ok := dialectAliases[strings.ToLower(strings.TrimSpace(driver))]
+	return dialect, ok
+}
+
+// SupportedDialects lists the dialects DDL can be generated for.
+func SupportedDialects() []string {
+	return append([]string(nil), supportedDialects...)
+}
+
 // DataSource holds the necessary fields for a DSN (data source name)
 type DataSource struct {
 	Driver   string

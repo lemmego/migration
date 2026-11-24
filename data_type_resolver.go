@@ -183,7 +183,11 @@ func (dataType *DataType) ToString() string {
 	case DriverPostgres:
 		columnType = dataType.postgresName
 	default:
-		panic("Unsupported driver")
+		// Reached only when a Schema was built without Validate, which now
+		// rejects an unknown dialect. The driver is named because the old
+		// message was "Unsupported driver" and nothing else.
+		panic(fmt.Sprintf("migration: unsupported driver %q for column %q",
+			dataType.driver, dataType.columnName))
 	}
 
 	if dataType.columnName == "" {
