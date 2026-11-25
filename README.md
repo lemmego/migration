@@ -84,6 +84,18 @@ Or,
 
 If you didn't provide a `MIGRATIONS_DIR` env variable, A migration file will be created inside the `projectroot/cmd/migrations/` directory. If the directory is not present in your project root, the `migrate create ...` command will create one for you. Open the migration file and populate the `up()` and `down()` method like this:
 
+Migration sets can be separated with `--path`. Paths are relative names for sets of migrations; they do not load Go source files at runtime. The migration packages must be imported by the application so their `init` functions register the compiled migrations. For example, migrations generated under `MIGRATIONS_DIR/tenant` need an import such as `_ "projectroot/cmd/migrations/tenant"` in the executable. Generated scoped migrations use `AddMigrationIn` automatically:
+
+```sh
+go run . create --path tenant create_orders_table
+go run . up --path tenant
+go run . down --path tenant --step 1
+go run . status --path tenant
+go run . fresh --path tenant
+```
+
+Repeat `--path` on lifecycle commands to select more than one set; `create` accepts one output path. Omitting `--path` keeps the existing behavior and selects all registered migrations. `fresh --path tenant` reverts and reruns only migrations registered in `tenant`.
+
 ```go
 // 20220729200658_create_users_table.go
 

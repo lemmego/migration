@@ -6,11 +6,21 @@ import (
 )
 
 func init() {
+	{{if .Path}}
+	if err := migration.GetMigrator().AddMigrationIn("{{.Path}}", &migration.Migration{
+		Version: "{{.Version}}",
+		Up:      mig_{{.Version}}_{{.Name}}_up,
+		Down:    mig_{{.Version}}_{{.Name}}_down,
+	}); err != nil {
+		panic(err)
+	}
+	{{else}}
 	migration.GetMigrator().AddMigration(&migration.Migration{
 		Version: "{{.Version}}",
 		Up:      mig_{{.Version}}_{{.Name}}_up,
 		Down:    mig_{{.Version}}_{{.Name}}_down,
 	})
+	{{end}}
 }
 
 func mig_{{.Version}}_{{.Name}}_up(tx *sql.Tx) error {

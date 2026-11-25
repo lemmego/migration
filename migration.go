@@ -7,8 +7,10 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"go/token"
 	"html/template"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -25,15 +27,17 @@ type Migration struct {
 	Down    func(*sql.Tx) error
 
 	done bool
+	path string
 }
 
 // Migrator is a struct that holds the migrations
 type Migrator struct {
-	mu         sync.Mutex
-	db         *sql.DB
-	dialect    string
-	Versions   []string
-	Migrations map[string]*Migration
+	mu            sync.Mutex
+	db            *sql.DB
+	dialect       string
+	Versions      []string
+	Migrations    map[string]*Migration
+	selectedPaths map[string]struct{}
 }
 
 var migrator = &Migrator{
@@ -76,28 +80,112 @@ func (m *Migrator) Dialect() string {
 func (m *Migrator) AddMigration(mg *Migration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	mg.path = ""
+	m.addMigrationLocked(mg)
+}
 
-	// Add the migration to the hash with version as key
+// AddMigrationIn registers a migration in a named, relative migration set.
+// Migration versions are global to the compiled registry, including across
+// paths, because schema_migrations stores versions without path metadata.
+func (m *Migrator) AddMigrationIn(pathName string, mg *Migration) error {
+	normalized, err := normalizeMigrationPath(pathName)
+	if err != nil {
+		return err
+	}
+	if mg == nil {
+		return errors.New("migration: cannot register a nil migration")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing := m.Migrations[mg.Version]; existing != nil && existing.path != normalized {
+		return fmt.Errorf("migration: version %q is already registered in path %q", mg.Version, existing.path)
+	}
+	mg.path = normalized
+	m.addMigrationLocked(mg)
+	return nil
+}
+
+// UsePaths selects the registered migration sets used by Up, Down, Fresh,
+// and MigrationStatus. Calling UsePaths with no arguments restores the legacy
+// behavior of selecting every registered migration.
+func (m *Migrator) UsePaths(paths ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(paths) == 0 {
+		m.selectedPaths = nil
+		return nil
+	}
+
+	selected := make(map[string]struct{}, len(paths))
+	for _, pathName := range paths {
+		normalized, err := normalizeMigrationPath(pathName)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, mg := range m.Migrations {
+			if mg.path == normalized {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("migration: no migrations registered in path %q", normalized)
+		}
+		selected[normalized] = struct{}{}
+	}
+	m.selectedPaths = selected
+	return nil
+}
+
+func normalizeMigrationPath(pathName string) (string, error) {
+	if pathName == "" || strings.Contains(pathName, "\\") || strings.HasPrefix(pathName, "/") || path.IsAbs(pathName) {
+		return "", fmt.Errorf("migration: path %q must be a non-empty relative slash-separated path", pathName)
+	}
+	cleaned := path.Clean(pathName)
+	if cleaned == "." || cleaned != pathName || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("migration: invalid path %q", pathName)
+	}
+	for _, segment := range strings.Split(cleaned, "/") {
+		if !token.IsIdentifier(segment) {
+			return "", fmt.Errorf("migration: path segment %q must be a valid Go identifier", segment)
+		}
+	}
+	return cleaned, nil
+}
+
+func (m *Migrator) addMigrationLocked(mg *Migration) {
 	_, already := m.Migrations[mg.Version]
 	m.Migrations[mg.Version] = mg
 	if already {
-		// Already in Versions, in the right place. Replacing the map entry
-		// is the whole of the update.
 		return
 	}
-
-	// Insert version into versions array using insertion sort
 	index := 0
-	for index < len(m.Versions) {
-		if m.Versions[index] > mg.Version {
-			break
-		}
+	for index < len(m.Versions) && m.Versions[index] <= mg.Version {
 		index++
 	}
-
 	m.Versions = append(m.Versions, mg.Version)
 	copy(m.Versions[index+1:], m.Versions[index:])
 	m.Versions[index] = mg.Version
+}
+
+func (m *Migrator) selectedMigrationsLocked() []*Migration {
+	selected := make([]*Migration, 0, len(m.Versions))
+	for _, version := range m.Versions {
+		mg := m.Migrations[version]
+		if mg == nil {
+			continue
+		}
+		if m.selectedPaths != nil {
+			if _, ok := m.selectedPaths[mg.path]; !ok {
+				continue
+			}
+		}
+		selected = append(selected, mg)
+	}
+	return selected
 }
 
 // Init populates the fields of Migrator and returns it
@@ -117,6 +205,7 @@ func Init(db *sql.DB, dialect string) (*Migrator, error) {
 	defer m.mu.Unlock()
 	m.db = db
 	m.dialect = dialect
+	m.selectedPaths = nil
 
 	// Create `schema_migrations` table to remember which migrations were executed.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -216,12 +305,11 @@ func (m *Migrator) Up(step int) error {
 	}
 
 	var completed []*Migration
-	for _, v := range m.Versions {
+	for _, mg := range m.selectedMigrationsLocked() {
 		if step > 0 && count == step {
 			break
 		}
 
-		mg := m.Migrations[v]
 		if mg.done {
 			continue
 		}
@@ -293,17 +381,7 @@ func (m *Migrator) Down(step int) error {
 	// The test that was supposed to cover this applied its two migrations in
 	// two separate Up calls, so one batch held one migration and both
 	// readings agreed. A single-batch case is the one that tells them apart.
-	var rows *sql.Rows
-	if step > 0 {
-		rows, err = tx.Query(fmt.Sprintf(
-			`SELECT version FROM schema_migrations ORDER BY batch DESC, version DESC LIMIT %s;`,
-			bindPlaceHolder), step)
-	} else {
-		// No step: the latest batch, which is what a bare `migrate down`
-		// has always meant and the convention everywhere else.
-		rows, err = tx.Query(
-			`SELECT version FROM schema_migrations WHERE batch = (SELECT MAX(batch) FROM schema_migrations) ORDER BY version DESC;`)
-	}
+	rows, err := tx.Query(`SELECT version, batch FROM schema_migrations ORDER BY batch DESC, version DESC;`)
 	if err != nil {
 		return err
 	}
@@ -317,19 +395,58 @@ func (m *Migrator) Down(step int) error {
 	// statement the reverted migration runs, so `migrate down` failed on
 	// Postgres every time while passing on MySQL and SQLite, whose drivers
 	// buffer the result set and hide the overlap.
-	var versions []string
+	selectedPaths := m.selectedPaths
+	var applied []struct {
+		version string
+		batch   int
+	}
 	for rows.Next() {
-		var version string
-		if err := rows.Scan(&version); err != nil {
+		var item struct {
+			version string
+			batch   int
+		}
+		if err := rows.Scan(&item.version, &item.batch); err != nil {
 			return err
 		}
-		versions = append(versions, version)
+		mg := m.Migrations[item.version]
+		if mg == nil {
+			if selectedPaths != nil {
+				continue
+			}
+			applied = append(applied, item)
+			continue
+		}
+		if selectedPaths != nil {
+			if _, ok := selectedPaths[mg.path]; !ok {
+				continue
+			}
+		}
+		applied = append(applied, item)
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+	var versions []string
+	if step > 0 {
+		if step < len(applied) {
+			applied = applied[:step]
+		}
+	} else if len(applied) > 0 {
+		latestBatch := applied[0].batch
+		for _, item := range applied {
+			if item.batch != latestBatch {
+				break
+			}
+			versions = append(versions, item.version)
+		}
+	}
+	if step > 0 {
+		for _, item := range applied {
+			versions = append(versions, item.version)
+		}
 	}
 
 	var reverted []*Migration
@@ -371,10 +488,15 @@ func (m *Migrator) Fresh() error {
 	if m == nil || m.db == nil {
 		return errors.New("migration: Fresh requires Init to be called first")
 	}
+	m.mu.Lock()
+	selected := m.selectedMigrationsLocked()
 	var applied int
-	if err := m.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
-		return fmt.Errorf("migration: counting applied migrations for fresh: %w", err)
+	for _, mg := range selected {
+		if mg.done {
+			applied++
+		}
 	}
+	m.mu.Unlock()
 	if applied > 0 {
 		if err := m.Down(applied); err != nil {
 			return fmt.Errorf("migration: reverting applied migrations for fresh: %w", err)
@@ -391,8 +513,8 @@ func (m *Migrator) MigrationStatus() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for _, v := range m.Versions {
-		mg := m.Migrations[v]
+	for _, mg := range m.selectedMigrationsLocked() {
+		v := mg.Version
 
 		if mg.done {
 			fmt.Println(fmt.Sprintf("Migration %s... completed", v))
@@ -406,12 +528,28 @@ func (m *Migrator) MigrationStatus() error {
 
 // guessPackageNameFromMigrationsDir guesses the package name from a given migrations dir path.
 func guessPackageNameFromMigrationsDir(migrationsDir string) string {
-	splitPath := strings.Split(migrationsDir, "/")
-	return splitPath[len(splitPath)-1]
+	return filepath.Base(filepath.Clean(migrationsDir))
 }
 
 // CreateMigration creates a migration file
 func CreateMigration(name string) error {
+	return createMigration("", name)
+}
+
+// CreateMigrationIn creates a migration in the configured migration root's
+// relative path and emits an AddMigrationIn registration.
+func CreateMigrationIn(pathName, name string) error {
+	normalized, err := normalizeMigrationPath(pathName)
+	if err != nil {
+		return err
+	}
+	return createMigration(normalized, name)
+}
+
+func createMigration(pathName, name string) error {
+	if !token.IsIdentifier(name) {
+		return fmt.Errorf("migration: invalid migration name %q", name)
+	}
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
 
 	if migrationsDir != "" {
@@ -421,6 +559,9 @@ func CreateMigration(name string) error {
 	}
 
 	packageName := guessPackageNameFromMigrationsDir(migrationsDir)
+	if pathName != "" {
+		packageName = filepath.Base(pathName)
+	}
 
 	version := time.Now().Format("20060102150405")
 
@@ -428,10 +569,12 @@ func CreateMigration(name string) error {
 		Version     string
 		Name        string
 		PackageName string
+		Path        string
 	}{
 		Version:     version,
 		Name:        name,
 		PackageName: packageName,
+		Path:        pathName,
 	}
 
 	var out bytes.Buffer
@@ -441,14 +584,42 @@ func CreateMigration(name string) error {
 	if err != nil {
 		return errors.New("Unable to execute template:" + err.Error())
 	}
-	wd, _ := os.Getwd()
-	path := filepath.Join(wd, migrationsDir)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(path, os.ModePerm); err != nil {
-			return errors.New("Unable to create migrations directory:" + err.Error())
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("migration: get working directory: %w", err)
+	}
+	baseDir := migrationsDir
+	if !filepath.IsAbs(baseDir) {
+		baseDir = filepath.Join(wd, baseDir)
+	}
+	root, err := filepath.Abs(baseDir)
+	if err != nil {
+		return fmt.Errorf("migration: resolve migrations root: %w", err)
+	}
+	if err := os.MkdirAll(root, os.ModePerm); err != nil {
+		return fmt.Errorf("migration: create migrations root: %w", err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("migration: resolve migrations root: %w", err)
+	}
+	resolvedOutput := resolvedRoot
+	if pathName != "" {
+		for _, segment := range strings.Split(pathName, "/") {
+			resolvedOutput = filepath.Join(resolvedOutput, segment)
+			if err := os.Mkdir(resolvedOutput, os.ModePerm); err != nil && !os.IsExist(err) {
+				return fmt.Errorf("migration: create migrations directory: %w", err)
+			}
+			info, err := os.Lstat(resolvedOutput)
+			if err != nil {
+				return fmt.Errorf("migration: inspect migrations directory: %w", err)
+			}
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return fmt.Errorf("migration: path component %q is not a real directory", segment)
+			}
 		}
 	}
-	f, err := os.Create(fmt.Sprintf("%s/%s_%s.go", path, version, name))
+	f, err := os.Create(filepath.Join(resolvedOutput, fmt.Sprintf("%s_%s.go", version, name)))
 	if err != nil {
 		return errors.New("Unable to create migration file:" + err.Error())
 	}

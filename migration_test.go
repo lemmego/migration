@@ -3,6 +3,10 @@ package migration
 import (
 	"database/sql"
 	"errors"
+	"go/parser"
+	"go/token"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +56,36 @@ func TestDownStepRollsBackLatestBatches(t *testing.T) {
 	}
 }
 
+func TestDownStepDoesNotRequireOlderMigrationsToBeRegistered(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	m.AddMigration(&Migration{
+		Version: "002",
+		Up:      func(*sql.Tx) error { return nil },
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec("DROP TABLE known_migration")
+			return err
+		},
+	})
+	if _, err := db.Exec(`CREATE TABLE known_migration (value TEXT);
+		INSERT INTO schema_migrations VALUES ('legacy_unknown', 1);
+		INSERT INTO schema_migrations VALUES ('002', 2);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(db, DriverSQLite); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Down(1); err != nil {
+		t.Fatalf("down latest registered migration: %v", err)
+	}
+	var remaining int
+	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 'legacy_unknown'").Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 1 {
+		t.Fatalf("unknown older migration rows = %d, want 1", remaining)
+	}
+}
+
 func newSQLiteMigrator(t *testing.T) (*sql.DB, *Migrator) {
 	t.Helper()
 
@@ -71,6 +105,259 @@ func newSQLiteMigrator(t *testing.T) (*sql.DB, *Migrator) {
 		t.Fatal(err)
 	}
 	return db, initialized
+}
+
+type pathScopedMigrator interface {
+	AddMigrationIn(string, *Migration) error
+	UsePaths(...string) error
+}
+
+func requirePathScopedMigrator(t *testing.T, m *Migrator) pathScopedMigrator {
+	t.Helper()
+	scoped, ok := any(m).(pathScopedMigrator)
+	if !ok {
+		t.Fatal("Migrator does not expose path-aware registration and selection")
+	}
+	return scoped
+}
+
+func addPathTableMigration(t *testing.T, scoped pathScopedMigrator, path, version, table string) {
+	t.Helper()
+	err := scoped.AddMigrationIn(path, &Migration{
+		Version: version,
+		Up: func(tx *sql.Tx) error {
+			_, err := tx.Exec("CREATE TABLE " + table + " (value TEXT)")
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec("INSERT INTO " + table + " VALUES ('preserved')")
+			return err
+		},
+		Down: func(tx *sql.Tx) error {
+			_, err := tx.Exec("DROP TABLE " + table)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("register %s migration: %v", path, err)
+	}
+}
+
+func TestMigratorAppliesOnlySelectedPathAndKeepsLegacyAllPaths(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	scoped := requirePathScopedMigrator(t, m)
+
+	for _, migration := range []struct {
+		path, version, table string
+	}{
+		{path: "platform", version: "001", table: "platform_only"},
+		{path: "tenant", version: "002", table: "tenant_only"},
+	} {
+		migration := migration
+		err := scoped.AddMigrationIn(migration.path, &Migration{
+			Version: migration.version,
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec("CREATE TABLE " + migration.table + " (id INTEGER)")
+				return err
+			},
+			Down: func(tx *sql.Tx) error {
+				_, err := tx.Exec("DROP TABLE " + migration.table)
+				return err
+			},
+		})
+		if err != nil {
+			t.Fatalf("register %s migration: %v", migration.path, err)
+		}
+	}
+
+	if err := scoped.UsePaths("tenant"); err != nil {
+		t.Fatalf("select tenant path: %v", err)
+	}
+	if err := m.Up(0); err != nil {
+		t.Fatalf("apply tenant path: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM tenant_only"); err != nil {
+		t.Fatalf("tenant migration was not applied: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM platform_only"); err == nil {
+		t.Fatal("platform migration ran while only the tenant path was selected")
+	}
+
+	if err := scoped.UsePaths(); err != nil {
+		t.Fatalf("clear path selection: %v", err)
+	}
+	if err := m.Up(0); err != nil {
+		t.Fatalf("apply legacy all-path set: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM platform_only"); err != nil {
+		t.Fatalf("unscoped platform migration was not applied: %v", err)
+	}
+}
+
+func TestMigratorDownOnlyRevertsSelectedPath(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	scoped := requirePathScopedMigrator(t, m)
+	addPathTableMigration(t, scoped, "platform", "001", "platform_down")
+	addPathTableMigration(t, scoped, "tenant", "002", "tenant_down")
+	if err := m.Up(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := scoped.UsePaths("tenant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Down(0); err != nil {
+		t.Fatalf("down tenant path: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM platform_down"); err != nil {
+		t.Fatalf("platform migration was reverted: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM tenant_down"); err == nil {
+		t.Fatal("tenant migration remains after down of the tenant path")
+	}
+	if got := countMigrations(t, db); got != 1 {
+		t.Fatalf("applied migrations after tenant down = %d, want 1", got)
+	}
+}
+
+func TestMigratorStatusListsOnlySelectedPath(t *testing.T) {
+	_, m := newSQLiteMigrator(t)
+	scoped := requirePathScopedMigrator(t, m)
+	addPathTableMigration(t, scoped, "platform", "001", "platform_status")
+	addPathTableMigration(t, scoped, "tenant", "002", "tenant_status")
+	if err := m.Up(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := scoped.UsePaths("platform"); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	statusErr := m.MigrationStatus()
+	_ = w.Close()
+	os.Stdout = oldStdout
+	output, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if statusErr != nil {
+		t.Fatalf("migration status: %v", statusErr)
+	}
+	if readErr != nil {
+		t.Fatalf("read status output: %v", readErr)
+	}
+	if !strings.Contains(string(output), "001") || strings.Contains(string(output), "002") {
+		t.Fatalf("platform status output = %q, want only migration 001", output)
+	}
+}
+
+func TestMigratorFreshOnlyRecreatesSelectedPath(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	scoped := requirePathScopedMigrator(t, m)
+	addPathTableMigration(t, scoped, "platform", "001", "platform_fresh")
+	addPathTableMigration(t, scoped, "tenant", "002", "tenant_fresh")
+	if err := m.Up(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO platform_fresh VALUES ('keep')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := scoped.UsePaths("tenant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Fresh(); err != nil {
+		t.Fatalf("fresh tenant path: %v", err)
+	}
+	var platformRows, tenantRows int
+	if err := db.QueryRow("SELECT COUNT(*) FROM platform_fresh").Scan(&platformRows); err != nil {
+		t.Fatalf("read platform table after tenant fresh: %v", err)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM tenant_fresh").Scan(&tenantRows); err != nil {
+		t.Fatalf("read tenant table after tenant fresh: %v", err)
+	}
+	if platformRows != 2 || tenantRows != 1 {
+		t.Fatalf("rows after tenant fresh: platform=%d tenant=%d, want platform=2 tenant=1", platformRows, tenantRows)
+	}
+	if got := countMigrations(t, db); got != 2 {
+		t.Fatalf("applied migrations after tenant fresh = %d, want 2", got)
+	}
+}
+
+func TestMigratorRejectsInvalidSelectedPathWithoutChangingSelection(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	scoped := requirePathScopedMigrator(t, m)
+	addPathTableMigration(t, scoped, "tenant", "001", "safe_tenant")
+	if err := scoped.UsePaths("tenant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := scoped.UsePaths("../tenant"); err == nil {
+		t.Fatal("parent traversal path was accepted")
+	}
+	if err := m.Up(0); err != nil {
+		t.Fatalf("previous valid selection was lost after invalid path: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM safe_tenant"); err != nil {
+		t.Fatalf("safe selected path was not applied: %v", err)
+	}
+}
+
+func TestInitResetsSelectedPaths(t *testing.T) {
+	db, m := newSQLiteMigrator(t)
+	scoped := requirePathScopedMigrator(t, m)
+	addPathTableMigration(t, scoped, "tenant", "init-reset-tenant", "init_reset_tenant")
+	if err := scoped.UsePaths("tenant"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(db, DriverSQLite); err != nil {
+		t.Fatalf("reinitialize migrator: %v", err)
+	}
+	if err := m.Up(0); err != nil {
+		t.Fatalf("run after Init reset: %v", err)
+	}
+	if _, err := db.Exec("SELECT * FROM init_reset_tenant"); err != nil {
+		t.Fatalf("Init did not reset selected paths: %v", err)
+	}
+}
+
+func TestCreateMigrationInGeneratesScopedRegistrationUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MIGRATIONS_DIR", root)
+	if err := CreateMigrationIn("tenant", "create_orders_table"); err != nil {
+		t.Fatalf("CreateMigrationIn() error = %v", err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "tenant", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("generated files = %v, want one migration under tenant path", files)
+	}
+	content, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `AddMigrationIn("tenant"`) {
+		t.Fatalf("generated migration lacks scoped registration: %s", content)
+	}
+	if !strings.Contains(string(content), "package tenant") {
+		t.Fatalf("generated migration has wrong package name: %s", content)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), files[0], content, parser.AllErrors); err != nil {
+		t.Fatalf("generated migration is invalid Go: %v", err)
+	}
+}
+
+func TestCreateMigrationInRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MIGRATIONS_DIR", root)
+	if err := CreateMigrationIn("../outside", "create_orders_table"); err == nil {
+		t.Fatal("CreateMigrationIn accepted a traversal path")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "outside")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected outside path state: %v", err)
+	}
 }
 
 func TestUpRollsBackMigrationErrorAndDoneState(t *testing.T) {

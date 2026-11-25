@@ -17,16 +17,33 @@ var migrateCreateCmd = &cobra.Command{
 			return
 		}
 		name := args[0]
-		// name, err := cmd.Flags().GetString("name")
-		// if err != nil {
-		// 	fmt.Println("Unable to read flag `name`", err.Error())
-		// 	return
-		// }
-		if err := migration.CreateMigration(name); err != nil {
+		paths, err := cmd.Flags().GetStringSlice("path")
+		if err != nil {
+			fmt.Println("Unable to read flag `path`", err.Error())
+			return
+		}
+		if len(paths) > 1 {
+			fmt.Println("Only one --path may be supplied to create")
+			return
+		}
+		if len(paths) == 1 {
+			err = migration.CreateMigrationIn(paths[0], name)
+		} else {
+			err = migration.CreateMigration(name)
+		}
+		if err != nil {
 			fmt.Println("Unable to create migration", err.Error())
 			return
 		}
 	},
+}
+
+func selectMigrationPaths(cmd *cobra.Command, migrator *migration.Migrator) error {
+	paths, err := cmd.Flags().GetStringSlice("path")
+	if err != nil {
+		return err
+	}
+	return migrator.UsePaths(paths...)
 }
 
 func GetDriver(cmd *cobra.Command) (string, error) {
@@ -137,7 +154,10 @@ var migrateUpCmd = &cobra.Command{
 			fmt.Println("Unable to fetch migrator", err.Error())
 			return
 		}
-
+		if err := selectMigrationPaths(cmd, migrator); err != nil {
+			fmt.Println("Unable to select migration paths", err)
+			return
+		}
 		err = migrator.Up(step)
 		if err != nil {
 			fmt.Println("Unable to run `up` migrations", err.Error())
@@ -179,6 +199,10 @@ var migrateDownCmd = &cobra.Command{
 			fmt.Println("Unable to fetch migrator", err.Error())
 			return
 		}
+		if err := selectMigrationPaths(cmd, migrator); err != nil {
+			fmt.Println("Unable to select migration paths", err)
+			return
+		}
 
 		err = migrator.Down(step)
 		if err != nil {
@@ -209,6 +233,9 @@ var migrateFreshCmd = &cobra.Command{
 		migrator, err := migration.Init(db, driver)
 		if err != nil {
 			return fmt.Errorf("unable to initialize migrator: %w", err)
+		}
+		if err := selectMigrationPaths(cmd, migrator); err != nil {
+			return fmt.Errorf("unable to select migration paths: %w", err)
 		}
 		fmt.Println("Refreshing database: all applied migration data will be removed")
 		return migrator.Fresh()
@@ -241,6 +268,10 @@ var migrateStatusCmd = &cobra.Command{
 			fmt.Println("Unable to fetch migrator", err.Error())
 			return
 		}
+		if err := selectMigrationPaths(cmd, migrator); err != nil {
+			fmt.Println("Unable to select migration paths", err)
+			return
+		}
 
 		if err := migrator.MigrationStatus(); err != nil {
 			fmt.Println("Unable to fetch migration status", err.Error())
@@ -254,22 +285,27 @@ func init() {
 	migrateCreateCmd.Flags().StringP("name", "n", "", "Name for the migration")
 	migrateCreateCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateCreateCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+	migrateCreateCmd.Flags().StringSlice("path", nil, "Relative migration path for generation (for example: tenant)")
 
 	// Add "--step", "--driver" and "--dsn" flags to "up" and "down" command
 	migrateUpCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
 	migrateUpCmd.Flags().StringP("driver", "d", "", "Data Source Name")
 	migrateUpCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+	migrateUpCmd.Flags().StringSlice("path", nil, "Select migration paths (repeatable)")
 
 	migrateDownCmd.Flags().IntP("step", "s", 0, "Number of migrations to execute")
 	migrateDownCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateDownCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+	migrateDownCmd.Flags().StringSlice("path", nil, "Select migration paths (repeatable)")
 
 	migrateFreshCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateFreshCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+	migrateFreshCmd.Flags().StringSlice("path", nil, "Select migration paths (repeatable)")
 
 	// Add "--driver" and "--dsn" flags to "status" command
 	migrateStatusCmd.Flags().StringP("driver", "d", "", "Driver Name")
 	migrateStatusCmd.Flags().StringP("dsn", "u", "", "Data Source Name")
+	migrateStatusCmd.Flags().StringSlice("path", nil, "Select migration paths (repeatable)")
 
 	// Add "create", "status", "up" and "down" commands to the "migrate" command
 	MigrateCmd.AddCommand(migrateUpCmd, migrateDownCmd, migrateFreshCmd, migrateCreateCmd, migrateStatusCmd)

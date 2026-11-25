@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	_ "github.com/glebarez/go-sqlite"
+	"github.com/lemmego/migration"
 	"github.com/spf13/cobra"
 )
 
@@ -126,4 +130,110 @@ func TestMigrateFreshCommandIsRegisteredWithDatabaseFlags(t *testing.T) {
 	if fresh.Flags().Lookup("driver") == nil || fresh.Flags().Lookup("dsn") == nil {
 		t.Fatal("migrate fresh must accept the same driver and DSN options as up/down")
 	}
+	if fresh.Flags().Lookup("path") == nil {
+		t.Fatal("migrate fresh must accept --path")
+	}
+}
+
+func TestMigrationLifecycleCommandsExposePathFlag(t *testing.T) {
+	for _, name := range []string{"up", "down", "fresh", "status", "create"} {
+		t.Run(name, func(t *testing.T) {
+			var command *cobra.Command
+			for _, candidate := range MigrateCmd.Commands() {
+				if candidate.Name() == name {
+					command = candidate
+					break
+				}
+			}
+			if command == nil || command.Flags().Lookup("path") == nil {
+				t.Fatalf("migrate %s must expose --path", name)
+			}
+		})
+	}
+}
+
+func TestSelectMigrationPathsConfiguresMigrator(t *testing.T) {
+	migrator := migration.GetMigrator()
+	version := "path-selection-test"
+	if err := migrator.AddMigrationIn("cli_test", &migration.Migration{Version: version, Up: func(*sql.Tx) error { return nil }, Down: func(*sql.Tx) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &cobra.Command{Use: "up"}
+	cmd.Flags().StringSlice("path", []string{"cli_test"}, "")
+	if err := selectMigrationPaths(cmd, migrator); err != nil {
+		t.Fatalf("selectMigrationPaths() error = %v", err)
+	}
+	if err := migrator.UsePaths(); err != nil {
+		t.Fatalf("reset migration selection: %v", err)
+	}
+}
+
+func TestMigrationCommandsUseSelectedPath(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cli-migrations.db")
+	migrator := migration.GetMigrator()
+	for _, migrationSpec := range []struct {
+		path, version, table string
+	}{
+		{path: "cli_lifecycle_platform", version: "cli-platform-001", table: "cli_platform_table"},
+		{path: "cli_lifecycle_tenant", version: "cli-tenant-001", table: "cli_tenant_table"},
+	} {
+		spec := migrationSpec
+		if err := migrator.AddMigrationIn(spec.path, &migration.Migration{
+			Version: spec.version,
+			Up: func(tx *sql.Tx) error {
+				_, err := tx.Exec("CREATE TABLE " + spec.table + " (value TEXT)")
+				return err
+			},
+			Down: func(tx *sql.Tx) error {
+				_, err := tx.Exec("DROP TABLE " + spec.table)
+				return err
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _ = migrator.UsePaths() })
+
+	configure := func(cmd *cobra.Command) {
+		t.Helper()
+		for flag, value := range map[string]string{"driver": "sqlite", "dsn": dbPath, "path": "cli_lifecycle_tenant"} {
+			if err := cmd.Flags().Set(flag, value); err != nil {
+				t.Fatalf("set %s: %v", flag, err)
+			}
+		}
+	}
+	configure(migrateUpCmd)
+	migrateUpCmd.Run(migrateUpCmd, nil)
+
+	assertTable := func(table string, wantPresent bool) {
+		t.Helper()
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var name string
+		err = db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name)
+		if wantPresent && err != nil {
+			t.Fatalf("expected table %s to exist: %v", table, err)
+		}
+		if !wantPresent && err == nil {
+			t.Fatalf("table %s unexpectedly exists", table)
+		}
+	}
+	assertTable("cli_tenant_table", true)
+	assertTable("cli_platform_table", false)
+
+	configure(migrateFreshCmd)
+	if err := migrateFreshCmd.RunE(migrateFreshCmd, nil); err != nil {
+		t.Fatalf("fresh selected path: %v", err)
+	}
+	assertTable("cli_tenant_table", true)
+	assertTable("cli_platform_table", false)
+
+	configure(migrateDownCmd)
+	migrateDownCmd.Run(migrateDownCmd, nil)
+	assertTable("cli_tenant_table", false)
+	assertTable("cli_platform_table", false)
+
 }
